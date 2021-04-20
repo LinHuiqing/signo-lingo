@@ -72,6 +72,7 @@ def train(model: nn.Module,
         # train mode for training
         model.train()
         count = 0
+        max_channels = 0
         for images, labels in train_loader:
             try:
                 # labels = extract_labels(labels, pos_label, device)
@@ -91,9 +92,11 @@ def train(model: nn.Module,
 
                 # print(count)
                 count += 1
+                max_channels = max(max_channels, images.shape[0])
             except Exception as e:
                 print(count)
                 print(images.shape)
+                print(f"max channels: {max_channels}")
                 print(f"loss: {running_loss/count+1}")
                 raise e
 
