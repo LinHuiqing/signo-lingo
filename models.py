@@ -106,6 +106,7 @@ class CNN(nn.Module):
         out = self.conv1(x)
         out = self.layers(out)
         out = self.avgpool(out)
+        # print(out.shape)
         out = torch.flatten(out, 1)
         out = self.fc(out)
         return out
@@ -113,24 +114,28 @@ class CNN(nn.Module):
 class RNN(nn.Module):
 
     def __init__(self, 
-                 input_size, 
-                 hidden_size, 
+                 embed_dim, 
+                 hidden_dim, 
                  channel_out, 
                  n_layers, 
                  intermediate_act_fn="relu", 
-                 bidirectional=False):
+                 bidirectional=False, 
+                 device="cuda"):
         
         super(RNN, self).__init__()
 
-        self.lstm = nn.LSTM(input_size, 
-                            hidden_size, 
-                            num_layers=n_layers, 
-                            bidirectional=bidirectional)
+        self.num_layers = n_layers
+        self.hidden_dim = hidden_dim
+        self.device = device
 
-        self.fc1 =  nn.Linear(hidden_size, 128) #fully connected 1
-        self.fc2 = nn.Linear(128, channel_out) #fully connected last layer
+        self.lstm = nn.LSTM(embed_dim, 
+                            self.hidden_dim, 
+                            num_layers=self.num_layers, 
+                            bidirectional=bidirectional, 
+                            batch_first=True)
 
-        
+        self.fc1 =  nn.Linear(self.hidden_dim, channel_out) #fully connected 1
+        # self.fc2 = nn.Linear(128, channel_out) #fully connected last layer
 
         if intermediate_act_fn == "relu":
             self.a_fn = nn.ReLU()
@@ -142,17 +147,27 @@ class RNN(nn.Module):
             raise ValueError("please use a valid activation function argument ('relu'; 'leaky_relu'; 'param_relu')")
 
     def forward(self, x):
-        # h_0 = Variable(torch.zeros(self.num_layers, x.size(0), self.hidden_size)) #hidden state
-        # c_0 = Variable(torch.zeros(self.num_layers, x.size(0), self.hidden_size)) #internal state
+        # print(x.shape)
+        h = torch.zeros(self.num_layers, x.size(0), self.hidden_dim).to(self.device)
+        c = torch.zeros(self.num_layers, x.size(0), self.hidden_dim).to(self.device)
+
+        # h = Variable(torch.zeros(self.num_layers, x.size(0), 10)) #hidden state
+        # c = Variable(torch.zeros(self.num_layers, x.size(0), 10)) #internal state
 
         # Propagate input through LSTM
-        output, (hn, cn) = self.lstm(x) #lstm with input, hidden, and internal state
+        output, (h, c) = self.lstm(x, (h, c)) #lstm with input, hidden, and internal state
         # hn = hn.view(-1, self.hidden_size) #reshaping the data for Dense layer next
-
-        out = self.a_fn(hn)
+        # print("=====")
+        # print(output.shape)
+        # print(h.shape)
+        out = self.a_fn(h)
+        # print(out.shape)
         out = self.fc1(out)
-        out = self.a_fn(out)
-        out = self.fc2(output)
+        # print(out.shape)
+        # out = self.a_fn(out)
+        # print(out.shape)
+        # out = self.fc2(output)
+        # print(out.shape)
         return out
 
 class CNN_RNN(nn.Module):
@@ -177,6 +192,9 @@ class CNN_RNN(nn.Module):
 
     def forward(self, x):
         latent_var = self.CNN(x)
+        # print(latent_var.shape)
+        latent_var = torch.unsqueeze(latent_var, 0)
+        # print(latent_var.shape)
         out = self.RNN(latent_var)
         out = self.log_softmax(out)
         return out

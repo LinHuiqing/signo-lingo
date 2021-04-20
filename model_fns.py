@@ -71,19 +71,31 @@ def train(model: nn.Module,
     for epoch in range(1, no_of_epochs+1):
         # train mode for training
         model.train()
+        count = 0
         for images, labels in train_loader:
-            # labels = extract_labels(labels, pos_label, device)
-            images, labels = images.to(device), labels.to(device)
-            images = torch.squeeze(images)
+            try:
+                # labels = extract_labels(labels, pos_label, device)
+                images, labels = images.to(device), labels.to(device)
+                images = torch.squeeze(images)
 
-            optimizer.zero_grad()
-            
-            output = model.forward(images)
-            loss = criterion(output, labels)
-            loss.backward()
-            optimizer.step()
+                optimizer.zero_grad()
+                
+                output = model.forward(images)
+                output = torch.squeeze(output, 0)
 
-            running_loss += loss.item()
+                loss = criterion(output, labels)
+                loss.backward()
+                optimizer.step()
+
+                running_loss += loss.item()
+
+                # print(count)
+                count += 1
+            except Exception as e:
+                print(count)
+                print(images.shape)
+                print(f"loss: {running_loss/count+1}")
+                raise e
 
         # eval mode for predictions
         model.eval()
