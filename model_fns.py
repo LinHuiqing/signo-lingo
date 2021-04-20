@@ -51,7 +51,6 @@ def train(model: nn.Module,
           device:str="cuda", 
           lr_scheduler:bool=False):
     model.to(device)
-    print("hi")
 
     if save_dir != None:
         os.mkdir(save_dir)

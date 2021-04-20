@@ -95,8 +95,12 @@ class CNN(nn.Module):
             layers[str(i)] = ConvBlock(channels[i], channels[i+1], intermediate_act_fn, use_batchnorm=use_batchnorm)
         
         self.layers = nn.Sequential(layers)
-        self.avgpool = nn.AdaptiveAvgPool2d(10)
-        self.fc = nn.Linear(channels[n_layers+1], channel_out)
+
+        pool_size = 20
+        self.avgpool = nn.AdaptiveAvgPool2d(pool_size)
+        
+        fc_in = channels[n_layers] * pool_size * pool_size
+        self.fc = nn.Linear(fc_in, channel_out)
         
     def forward(self, x):
         out = self.conv1(x)
