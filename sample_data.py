@@ -39,7 +39,10 @@ if __name__ == "__main__":
     
     # extract sampled classes and save
     class_df, sampled_class_ids = choose_labels(class_df, args.n_classes)
-    class_df.to_csv(f"{args.output_dir}/filtered_ClassId.csv")
+    class_df = class_df.reset_index(drop=True)
+    class_df["oldClassId"] = class_df["ClassId"]
+    class_df["ClassId"] = class_df.index
+    class_df.to_csv(f"{args.output_dir}/filtered_ClassId.csv", index=False)
 
     # read csv from dataset
     df_store = {}
@@ -49,5 +52,7 @@ if __name__ == "__main__":
 
     # get filtered sets and save them
     for dataset_type, df in df_store.items():
-        df_store[dataset_type] = df[df[1].isin(sampled_class_ids)]
-        df.to_csv(f"{args.output_dir}/{dataset_type}.csv", header=False)
+        df = df[df[1].isin(sampled_class_ids)]
+        df[1] = df[1].map(dict(zip(class_df["oldClassId"], class_df["ClassId"])))
+        print(f"filtered {dataset_type} set has {len(df)} rows")
+        df.to_csv(f"{args.output_dir}/{dataset_type}.csv", header=False, index=False)
