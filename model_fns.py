@@ -1,51 +1,63 @@
-import time
 import os
-from torch.utils.data import DataLoader
-import torch.nn as nn
-import torch
-import torch.optim as optim
+import time
 
-# define test function 
-def test(model: nn.Module, 
-         test_loader: DataLoader, 
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+from torch.utils.data import DataLoader
+from tqdm import tqdm
+from sklearn.metrics import accuracy_score, classification_report
+
+
+# define val function 
+def val(model: nn.Module, 
+         val_loader: DataLoader, 
          criterion, 
          device: str):
-    test_loss = 0
-    acc_store = preci_store = recall_store = f1_store = 0
+    val_loss = 0
+    val_acc = 0 
+    metrics_store = {}
     
-    for images, labels in test_loader:
-        # labels = extract_labels(labels, pos_label, device)
-        images, labels = images.to(device), labels.to(device)
-        
-        output = model.forward(images)
-        test_loss += criterion(output, labels).item()
-        
-        # output = torch.exp(output)
-        output = output.argmax(1)
-        # output = F.one_hot(output, num_classes=2)
-        # true_pos, true_neg, false_pos, false_neg = get_confusion_matrix(labels, output)
-        # accuracy, precision, recall, f1 = get_metrics(true_pos, true_neg, false_pos, false_neg)
-        # acc_store += accuracy
-        # preci_store += precision
-        # recall_store += recall
-        # f1_store += f1
+    with tqdm(val_loader, unit="batch") as tepoch:
+        for images, labels in tepoch:
+            images, labels = images.to(device), labels.to(device)
+            
+            output = model.forward(images)
+            val_loss += criterion(output, labels).item()
+            
+            output = output.argmax(1)
+            output = F.one_hot(output, num_classes=labels.shape[1])
 
-    test_loss /= len(test_loader)
-    acc_store /= len(test_loader)
-    preci_store /= len(test_loader)
-    recall_store /= len(test_loader)
-    f1_store /= len(test_loader)
+            output = output.cpu()
+            labels = labels.cpu()
 
-    return test_loss, acc_store, preci_store, recall_store, f1_store
+            accuracy = accuracy_score(labels, output)
+            metrics_report = classification_report(labels, output, digits=3, output_dict=True, zero_division=0)
+
+            val_acc += accuracy
+            for label, metrics_dict in metrics_report.items():
+                metrics_store[label] = metrics_store.get(label, {})
+                for metric_type, metric_val in metrics_dict.items():
+                    metrics_store[label][metric_type] = metrics_store[label].get(metric_type, 0)
+                    metrics_store[label][metric_type] += metric_val
+
+            tepoch.set_postfix(loss=val_loss, accuracy=accuracy)
+
+    val_loss /= len(val_loader)
+    val_acc /= len(val_loader)
+
+    for label, metrics_dict in metrics_report.items():
+        for metric_type, metric_val in metrics_dict.items():
+            metrics_store[label][metric_type] /= len(val_loader)
+
+    return val_loss, val_acc, metrics_store
 
 # define train function
 def train(model: nn.Module, 
           train_loader: DataLoader, 
-          test_loader: DataLoader, 
+          val_loader: DataLoader, 
           no_of_epochs: int, 
-        #   pos_label: str, 
-        #   weight: torch.tensor, 
-        #   pos_weight: torch.tensor, 
           save_dir:str=None, 
           patience:int=10, 
           device:str="cuda", 
@@ -55,34 +67,31 @@ def train(model: nn.Module,
     if save_dir != None:
         os.mkdir(save_dir)
 
-    criterion = nn.BCEWithLogitsLoss()#weight= weight, pos_weight=pos_weight)
+    criterion = nn.BCEWithLogitsLoss()
     optimizer = optim.Adam(model.parameters())
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=patience//3, verbose=True)
 
     criterion.to(device)
 
     running_loss = 0
+    running_acc = 0
 
-    train_loss_store, test_loss_store = [], []
-    acc_store, preci_store, recall_store, f1_store = [], [], [], []
+    train_loss_store, train_acc_store = [], []
+    val_loss_store, val_acc_store = [], []
+    val_metrics_store = []
     # early_stopper = EarlyStopping(patience=patience)
 
     start = time.time()
     for epoch in range(1, no_of_epochs+1):
         # train mode for training
         model.train()
-        count = 0
-        max_channels = 0
-        for images, labels in train_loader:
-            try:
-                # labels = extract_labels(labels, pos_label, device)
+        with tqdm(train_loader, unit="batch") as tepoch:
+            for images, labels in tepoch:
                 images, labels = images.to(device), labels.to(device)
-                images = torch.squeeze(images)
 
                 optimizer.zero_grad()
                 
                 output = model.forward(images)
-                output = torch.squeeze(output, 0)
 
                 loss = criterion(output, labels)
                 loss.backward()
@@ -90,50 +99,45 @@ def train(model: nn.Module,
 
                 running_loss += loss.item()
 
-                # print(count)
-                count += 1
-                max_channels = max(max_channels, images.shape[0])
-            except Exception as e:
-                print(count)
-                print(images.shape)
-                print(f"max channels: {max_channels}")
-                print(f"loss: {running_loss/count+1}")
-                raise e
+                correct = (output.argmax(1) == labels.argmax(1)).sum().item()
+                train_acc = correct / len(images)
+
+                running_acc += train_acc
+
+                tepoch.set_postfix(loss=loss.item(), accuracy=train_acc)
 
         # eval mode for predictions
         model.eval()
 
-        # turn off gradients for test
+        # turn off gradients for val
         with torch.no_grad():
-            test_loss, accuracy, precision, recall, f1 = test(model, test_loader, criterion, device)
+            val_loss, val_acc, val_metrics = val(model, val_loader, criterion, device)
 
         train_loss_store.append(running_loss/len(train_loader))
-        test_loss_store.append(test_loss)
-        acc_store.append(accuracy)
-        preci_store.append(precision)
-        recall_store.append(recall)
-        f1_store.append(f1)
+        train_acc_store.append(running_acc/len(train_loader))
+        val_loss_store.append(val_loss)
+        val_acc_store.append(val_acc)
+        val_metrics_store.append(val_metrics)
 
         print(f"Epoch: {epoch}/{no_of_epochs} - ",
               f"Training Loss: {train_loss_store[-1]:.3f} - ",
-              f"Test Loss: {test_loss_store[-1]:.3f} - ",
-              f"Test Accuracy: {acc_store[-1]:.3f} - ", 
-              f"Test Precision: {preci_store[-1]:.3f} - ", 
-              f"Test Recall: {recall_store[-1]:.3f} - ", 
-              f"Test F1 Score: {f1_store[-1]:.3f}")
+              f"Training Accuracy: {train_acc_store[-1]:.3f} - ",
+              f"Val Loss: {val_loss_store[-1]:.3f} - ",
+              f"Val Accuracy: {val_acc_store[-1]:.3f} - ")
 
         if save_dir != None:
             torch.save(model.state_dict(), f"{save_dir}/{epoch}.pt")
         
-        # if early_stopper.stop(test_loss_store[-1]):
+        # if early_stopper.stop(val_loss_store[-1]):
         #     print("Model has overfit, early stopping...")
         #     break
 
         if lr_scheduler:
-            scheduler.step(test_loss_store[-1])
+            scheduler.step(val_loss_store[-1])
         
         running_loss = 0
+        running_acc = 0
 
     print(f"Run time: {(time.time() - start)/60:.3f} min")
     
-    return train_loss_store, test_loss_store, acc_store, preci_store, recall_store, f1_store
+    return train_loss_store, train_acc_store, val_loss_store, val_acc_store, val_metrics_store #, preci_store, recall_store, f1_store

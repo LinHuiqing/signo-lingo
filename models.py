@@ -159,8 +159,11 @@ class RNN(nn.Module):
         # hn = hn.view(-1, self.hidden_size) #reshaping the data for Dense layer next
         # print("=====")
         # print(output.shape)
+        # print(output[:, -1, :].shape)
         # print(h.shape)
-        out = self.a_fn(h)
+        last_out = output[:, -1, :]
+        # print(last_out.shape)
+        out = self.a_fn(last_out)
         # print(out.shape)
         out = self.fc1(out)
         # print(out.shape)
@@ -186,16 +189,21 @@ class CNN_RNN(nn.Module):
         super(CNN_RNN, self).__init__()
 
         self.CNN = CNN(latent_size, n_cnn_layers, intermediate_act_fn=cnn_act_fn, use_batchnorm=cnn_bn, channel_in=channel_in)
-        self.RNN = RNN(latent_size, 64, n_classes, n_rnn_layers, intermediate_act_fn=rnn_act_fn, bidirectional=bidirectional)
+        self.RNN = RNN(latent_size, 3, n_classes, n_rnn_layers, intermediate_act_fn=rnn_act_fn, bidirectional=bidirectional)
 
         self.log_softmax = nn.LogSoftmax(dim=1)
 
     def forward(self, x):
-        latent_var = self.CNN(x)
-        # print(latent_var.shape)
-        latent_var = torch.unsqueeze(latent_var, 0)
-        # print(latent_var.shape)
-        out = self.RNN(latent_var)
+        # print(x.shape)
+        batch_size, timesteps, C, H, W = x.size()
+        cnn_in = x.view(batch_size * timesteps, C, H, W)
+
+        latent_var = self.CNN(cnn_in)
+
+        rnn_in = latent_var.view(batch_size, timesteps, -1)
+        out = self.RNN(rnn_in)
+        # print(out.shape)
         out = self.log_softmax(out)
+        # print(out.shape)
         return out
     
