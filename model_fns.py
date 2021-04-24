@@ -64,7 +64,7 @@ def train(model: nn.Module,
           lr_scheduler:bool=False):
     model.to(device)
 
-    if save_dir != None:
+    if save_dir != None and not os.path.exists(save_dir):
         os.mkdir(save_dir)
 
     criterion = nn.BCEWithLogitsLoss()
