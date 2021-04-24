@@ -59,6 +59,10 @@ def train(model: nn.Module,
           val_loader: DataLoader, 
           no_of_epochs: int, 
           save_dir:str=None, 
+          save_checkpoint:bool=False,
+          load_dir:str=None,
+          load_epoch:int=None,
+          load_checkpoint:bool=False,
           patience:int=10, 
           device:str="cuda", 
           lr_scheduler:bool=False):
@@ -80,9 +84,18 @@ def train(model: nn.Module,
     val_loss_store, val_acc_store = [], []
     val_metrics_store = []
     # early_stopper = EarlyStopping(patience=patience)
+    start_epoch = 1
+
+    if load_checkpoint and load_dir and load_epoch:
+        checkpoint = torch.load(f"{load_dir}/{load_epoch}-checkpoint.pt")
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        start_epoch = checkpoint['epoch'] + 1
+        loss = checkpoint['loss']
 
     start = time.time()
-    for epoch in range(1, no_of_epochs+1):
+    for epoch in range(start_epoch, no_of_epochs+1):
         # train mode for training
         model.train()
         with tqdm(train_loader, unit="batch") as tepoch:
@@ -126,7 +139,16 @@ def train(model: nn.Module,
               f"Val Accuracy: {val_acc_store[-1]:.3f} - ")
 
         if save_dir != None:
-            torch.save(model.state_dict(), f"{save_dir}/{epoch}.pt")
+            if save_checkpoint:
+                torch.save({
+                    'epoch': epoch,
+                    'model_state_dict': model.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'scheduler_state_dict': scheduler.state_dict(),
+                    'loss': loss,
+                }, f"{save_dir}/{epoch}-checkpoint.pt")
+            else:
+                torch.save(model.state_dict(), f"{save_dir}/{epoch}.pt")
         
         # if early_stopper.stop(val_loss_store[-1]):
         #     print("Model has overfit, early stopping...")
