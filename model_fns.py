@@ -22,9 +22,12 @@ def val(model: nn.Module,
     with tqdm(val_loader, unit="batch") as tepoch:
         for images, labels in tepoch:
             images, labels = images.to(device), labels.to(device)
+            labels_loss = labels.long()
+            labels_loss = labels.argmax(dim=1)
             
             output = model.forward(images)
-            val_loss += criterion(output, labels).item()
+            loss = criterion(output, labels_loss).item()
+            val_loss += loss
             
             output = output.argmax(1)
             output = F.one_hot(output, num_classes=labels.shape[1])
@@ -42,7 +45,7 @@ def val(model: nn.Module,
                     metrics_store[label][metric_type] = metrics_store[label].get(metric_type, 0)
                     metrics_store[label][metric_type] += metric_val
 
-            tepoch.set_postfix(loss=val_loss, accuracy=accuracy)
+            tepoch.set_postfix(loss=loss, accuracy=accuracy)
 
     val_loss /= len(val_loader)
     val_acc /= len(val_loader)
@@ -67,7 +70,7 @@ def train(model: nn.Module,
     if save_dir != None:
         os.mkdir(save_dir)
 
-    criterion = nn.BCEWithLogitsLoss()
+    criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters())
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=patience//3, verbose=True)
 
@@ -88,7 +91,8 @@ def train(model: nn.Module,
         with tqdm(train_loader, unit="batch") as tepoch:
             for images, labels in tepoch:
                 images, labels = images.to(device), labels.to(device)
-
+                labels = labels.long()
+                labels = labels.argmax(dim=1)
                 optimizer.zero_grad()
                 
                 output = model.forward(images)
@@ -99,44 +103,44 @@ def train(model: nn.Module,
 
                 running_loss += loss.item()
 
-                correct = (output.argmax(1) == labels.argmax(1)).sum().item()
+                correct = (output.argmax(1) == labels).sum().item()
                 train_acc = correct / len(images)
 
                 running_acc += train_acc
 
                 tepoch.set_postfix(loss=loss.item(), accuracy=train_acc)
 
-        # eval mode for predictions
-        model.eval()
+            # eval mode for predictions
+            model.eval()
 
-        # turn off gradients for val
-        with torch.no_grad():
-            val_loss, val_acc, val_metrics = val(model, val_loader, criterion, device)
+            # turn off gradients for val
+            with torch.no_grad():
+                val_loss, val_acc, val_metrics = val(model, val_loader, criterion, device)
 
-        train_loss_store.append(running_loss/len(train_loader))
-        train_acc_store.append(running_acc/len(train_loader))
-        val_loss_store.append(val_loss)
-        val_acc_store.append(val_acc)
-        val_metrics_store.append(val_metrics)
+            train_loss_store.append(running_loss/len(train_loader))
+            train_acc_store.append(running_acc/len(train_loader))
+            val_loss_store.append(val_loss)
+            val_acc_store.append(val_acc)
+            val_metrics_store.append(val_metrics)
 
-        print(f"Epoch: {epoch}/{no_of_epochs} - ",
-              f"Training Loss: {train_loss_store[-1]:.3f} - ",
-              f"Training Accuracy: {train_acc_store[-1]:.3f} - ",
-              f"Val Loss: {val_loss_store[-1]:.3f} - ",
-              f"Val Accuracy: {val_acc_store[-1]:.3f} - ")
+            print(f"Epoch: {epoch}/{no_of_epochs} - ",
+                f"Training Loss: {train_loss_store[-1]:.3f} - ",
+                f"Training Accuracy: {train_acc_store[-1]:.3f} - ",
+                f"Val Loss: {val_loss_store[-1]:.3f} - ",
+                f"Val Accuracy: {val_acc_store[-1]:.3f} - ")
 
-        if save_dir != None:
-            torch.save(model.state_dict(), f"{save_dir}/{epoch}.pt")
-        
-        # if early_stopper.stop(val_loss_store[-1]):
-        #     print("Model has overfit, early stopping...")
-        #     break
+            if save_dir != None:
+                torch.save(model.state_dict(), f"{save_dir}/{epoch}.pt")
+            
+            # if early_stopper.stop(val_loss_store[-1]):
+            #     print("Model has overfit, early stopping...")
+            #     break
 
-        if lr_scheduler:
-            scheduler.step(val_loss_store[-1])
-        
-        running_loss = 0
-        running_acc = 0
+            if lr_scheduler:
+                scheduler.step(val_loss_store[-1])
+            
+            running_loss = 0
+            running_acc = 0
 
     print(f"Run time: {(time.time() - start)/60:.3f} min")
     
