@@ -382,3 +382,98 @@ class VGG_LSTM(nn.Module):
 #             y = y.view(-1, x.size(1), y.size(-1))  # (timesteps, samples, output_size)
 
 #         return y
+
+"""
+source: https://github.com/0aqz0/SLR/blob/master/models/ConvLSTM.py
+Implementation of CNN+LSTM.
+"""
+class CRNN(nn.Module):
+    def __init__(self, sample_size=256, sample_duration=16, num_classes=100,
+                lstm_hidden_size=512, lstm_num_layers=1):
+        super(CRNN, self).__init__()
+        self.sample_size = sample_size
+        self.sample_duration = sample_duration
+        self.num_classes = num_classes
+
+        # network params
+        self.ch1, self.ch2, self.ch3, self.ch4 = 64, 128, 256, 512
+        self.k1, self.k2, self.k3, self.k4 = (7, 7), (3, 3), (3, 3), (3, 3)
+        self.s1, self.s2, self.s3, self.s4 = (2, 2), (1, 1), (1, 1), (1, 1)
+        self.p1, self.p2, self.p3, self.p4 = (0, 0), (0, 0), (0, 0), (0, 0)
+        self.d1, self.d2, self.d3, self.d4 = (1, 1), (1, 1), (1, 1), (1, 1)
+        self.lstm_input_size = self.ch4
+        self.lstm_hidden_size = lstm_hidden_size
+        self.lstm_num_layers = lstm_num_layers
+
+        # network architecture
+        # in_channels=3 for rgb
+        self.conv1 = nn.Sequential(
+            nn.Conv2d(in_channels=3, out_channels=self.ch1, kernel_size=self.k1, stride=self.s1, padding=self.p1, dilation=self.d1),
+            nn.BatchNorm2d(self.ch1, momentum=0.01),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(in_channels=self.ch1, out_channels=self.ch1, kernel_size=1, stride=1),
+            nn.MaxPool2d(kernel_size=2),
+        )
+        self.conv2 = nn.Sequential(
+            nn.Conv2d(in_channels=self.ch1, out_channels=self.ch2, kernel_size=self.k2, stride=self.s2, padding=self.p2, dilation=self.d2),
+            nn.BatchNorm2d(self.ch2, momentum=0.01),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(in_channels=self.ch2, out_channels=self.ch2, kernel_size=1, stride=1),
+            nn.MaxPool2d(kernel_size=2),
+        )
+        self.conv3 = nn.Sequential(
+            nn.Conv2d(in_channels=self.ch2, out_channels=self.ch3, kernel_size=self.k3, stride=self.s3, padding=self.p3, dilation=self.d3),
+            nn.BatchNorm2d(self.ch3, momentum=0.01),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(in_channels=self.ch3, out_channels=self.ch3, kernel_size=1, stride=1),
+            nn.MaxPool2d(kernel_size=2),
+        )
+        self.conv4 = nn.Sequential(
+            nn.Conv2d(in_channels=self.ch3, out_channels=self.ch4, kernel_size=self.k4, stride=self.s4, padding=self.p4, dilation=self.d4),
+            nn.BatchNorm2d(self.ch4, momentum=0.01),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(in_channels=self.ch4, out_channels=self.ch4, kernel_size=1, stride=1),
+            nn.AdaptiveAvgPool2d((1,1)),
+        )
+        self.lstm = nn.LSTM(
+            input_size=self.lstm_input_size,
+            hidden_size=self.lstm_hidden_size,
+            num_layers=self.lstm_num_layers,
+            batch_first=True,
+        )
+        self.fc1 = nn.Linear(self.lstm_hidden_size, self.num_classes)
+
+    def forward(self, x):
+        # print("---")
+        # CNN
+        cnn_embed_seq = []
+        # print(x.shape)
+        # orig x: (batch_size, channel, t, h, w)
+        # print(x.shape)
+        # x: (batch_size, t, channel, h, w)
+        for t in range(x.size(1)):
+            # Conv
+            out = self.conv1(x[:, t, :, :, :])
+            out = self.conv2(out)
+            out = self.conv3(out)
+            out = self.conv4(out)
+            # print(out.shape)
+            out = out.view(out.size(0), -1)
+            # print(out.shape)
+            cnn_embed_seq.append(out)
+
+        cnn_embed_seq = torch.stack(cnn_embed_seq, dim=0)
+        # print(cnn_embed_seq.shape)
+        # batch first
+        cnn_embed_seq = cnn_embed_seq.transpose_(0, 1)
+        # print(cnn_embed_seq.shape)
+
+        # LSTM
+        # use faster code paths
+        self.lstm.flatten_parameters()
+        out, (h_n, c_n) = self.lstm(cnn_embed_seq, None)
+        # MLP
+        # out: (batch, seq, feature), choose the last time step
+        out = self.fc1(out[:, -1, :])
+
+        return out
