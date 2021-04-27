@@ -10,83 +10,142 @@ from tqdm import tqdm
 from sklearn.metrics import accuracy_score, classification_report
 
 
-# define val function 
-def val(model: nn.Module, 
-         val_loader: DataLoader, 
-         criterion, 
-         device: str):
-    val_loss = 0
-    val_acc = 0 
-    metrics_store = {}
+class EarlyStopping:
+    def __init__(self, 
+                 patience:int=10, 
+                 delta:int=0, 
+                 logger=None) -> None:
+        self.patience = patience
+        self.delta = delta
+        self.logger = logger
+
+        self.best_score = float("inf")
+        self.overfit_count = 0
+
+    def stop(self, loss):
+        threshold = self.best_score + self.delta
+        if loss > threshold:
+            self.overfit_count += 1
+            print_msg = f"Increment early stopper to {self.overfit_count} because val loss ({loss}) is greater than threshold ({threshold})"
+            if self.logger:
+                self.logger.info(print_msg)
+            else:
+                print(print_msg)
+        else:
+            self.overfit_count = 0
+        
+        self.best_score = min(self.best_score, loss)
+        
+        if self.overfit_count >= self.patience:
+            return True
+        else:
+            return False
+
+def _train_epoch(model, criterion, optimizer, dataloader, device):
+    model.train()
+    losses = []
+    all_label = []
+    all_pred = []
     
-    with tqdm(val_loader, unit="batch") as tepoch:
-        for images, labels in tepoch:
-            images, labels = images.to(device), labels.to(device)
-            labels_loss = labels.long()
-            labels_loss = labels.argmax(dim=1)
+    with tqdm(dataloader, unit="batch") as tepoch:
+        for inputs, labels in tepoch:
+            # get the inputs and labels
+            inputs, labels = inputs.to(device), labels.to(device)
+
+            optimizer.zero_grad()
+            # forward
+            outputs = model(inputs)
+            # outputs = torch.squeeze(outputs, dim=0)
+            if isinstance(outputs, list):
+                outputs = outputs[0]
+
+            # compute the loss
+            loss = criterion(outputs, labels)
+            losses.append(loss.item())
+
+            # compute the accuracy
+            prediction = torch.max(outputs, 1)[1]
+            all_label.extend(labels)
+            all_pred.extend(prediction)
+            # print(labels.cpu().data.squeeze().numpy())
+            # print(labels.cpu().data.numpy())
+            score = accuracy_score(labels.cpu().data.numpy(), prediction.cpu().data.numpy())
             
-            output = model.forward(images)
-            loss = criterion(output, labels_loss).item()
-            val_loss += loss
-            
-            output = output.argmax(1)
-            output = F.one_hot(output, num_classes=labels.shape[1])
+            # backward & optimize
+            loss.backward()
+            optimizer.step()
 
-            output = output.cpu()
-            labels = labels.cpu()
+            tepoch.set_postfix(loss=loss.item(), accuracy=score)
 
-            accuracy = accuracy_score(labels, output)
-            metrics_report = classification_report(labels, output, digits=3, output_dict=True, zero_division=0)
+    # Compute the average loss & accuracy
+    train_loss = sum(losses)/len(losses)
+    all_label = torch.stack(all_label, dim=0)
+    all_pred = torch.stack(all_pred, dim=0)
+    train_acc = accuracy_score(all_label.cpu().data.squeeze().numpy(), all_pred.cpu().data.squeeze().numpy())
 
-            val_acc += accuracy
-            for label, metrics_dict in metrics_report.items():
-                metrics_store[label] = metrics_store.get(label, {})
-                for metric_type, metric_val in metrics_dict.items():
-                    metrics_store[label][metric_type] = metrics_store[label].get(metric_type, 0)
-                    metrics_store[label][metric_type] += metric_val
+    return train_loss, train_acc
 
-            tepoch.set_postfix(loss=loss, accuracy=accuracy)
+def _val_epoch(model, criterion, dataloader, device):
+    model.eval()
+    losses = []
+    all_label = []
+    all_pred = []
 
-    val_loss /= len(val_loader)
-    val_acc /= len(val_loader)
+    with torch.no_grad():
+        with tqdm(dataloader, unit="batch") as tepoch:
+            for inputs, labels in tepoch:
+                # get the inputs and labels
+                inputs, labels = inputs.to(device), labels.to(device)
+                # forward
+                outputs = model(inputs)
+                if isinstance(outputs, list):
+                    outputs = outputs[0]
+                # compute the loss
+                loss = criterion(outputs, labels)
+                losses.append(loss.item())
+                # collect labels & prediction
+                prediction = torch.max(outputs, 1)[1]
+                all_label.extend(labels)
+                all_pred.extend(prediction)
 
-    for label, metrics_dict in metrics_report.items():
-        for metric_type, metric_val in metrics_dict.items():
-            metrics_store[label][metric_type] /= len(val_loader)
+                score = accuracy_score(labels.cpu().data.numpy(), prediction.cpu().data.numpy())
 
-    return val_loss, val_acc, metrics_store
+                tepoch.set_postfix(loss=loss.item(), accuracy=score)
+                
+    # Compute the average loss & accuracy
+    val_loss = sum(losses)/len(losses)
+    all_label = torch.stack(all_label, dim=0)
+    all_pred = torch.stack(all_pred, dim=0)
+    val_acc = accuracy_score(all_label.cpu().data.numpy(), all_pred.cpu().data.numpy())
+    
+    return val_loss, val_acc
 
-# define train function
 def train(model: nn.Module, 
           train_loader: DataLoader, 
           val_loader: DataLoader, 
-          no_of_epochs: int, 
+          no_of_epochs:int, 
+          logger,
+          writer,
           save_dir:str=None, 
           save_checkpoint:bool=False,
           load_dir:str=None,
           load_epoch:int=None,
           load_checkpoint:bool=False,
-          patience:int=10, 
           device:str="cuda", 
-          lr_scheduler:bool=False):
+          patience:int=10, 
+          optimizer_lr:int=0.001, 
+          weight_decay:int=0, 
+          use_scheduler:bool=False):
+    
+    if save_dir and not os.path.exists(save_dir):
+        os.mkdir(save_dir)
+    
     model.to(device)
 
-    if save_dir != None and not os.path.exists(save_dir):
-        os.mkdir(save_dir)
-
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters())
+    optimizer = optim.Adam(model.parameters(), lr=optimizer_lr, weight_decay=weight_decay)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=patience//3, verbose=True)
 
-    criterion.to(device)
-
-    running_loss = 0
-    running_acc = 0
-
-    train_loss_store, train_acc_store = [], []
-    val_loss_store, val_acc_store = [], []
-    val_metrics_store = []
-    # early_stopper = EarlyStopping(patience=patience)
     start_epoch = 1
 
     if load_checkpoint and load_dir and load_epoch:
@@ -95,75 +154,54 @@ def train(model: nn.Module,
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
         start_epoch = checkpoint['epoch'] + 1
-        loss = checkpoint['loss']
 
-    start = time.time()
+    # Start training
+    logger.info("Training Started".center(60, '#'))
+
+    early_stopper = EarlyStopping(patience=patience, logger=logger)
+
     for epoch in range(start_epoch, no_of_epochs+1):
-        # train mode for training
-        model.train()
-        with tqdm(train_loader, unit="batch") as tepoch:
-            for images, labels in tepoch:
-                images, labels = images.to(device), labels.to(device)
-                labels = labels.long()
-                labels = labels.argmax(dim=1)
-                optimizer.zero_grad()
-                
-                output = model.forward(images)
+        logger.info(f"Epoch {epoch}")
+        
+        # Train the model
+        train_loss, train_acc = _train_epoch(model, criterion, optimizer, train_loader, device)
 
-                loss = criterion(output, labels)
-                loss.backward()
-                optimizer.step()
+        writer.add_scalars('Loss', {'train': train_loss}, epoch)
+        writer.add_scalars('Accuracy', {'train': train_acc}, epoch)
+        logger.info("Average Training Loss of Epoch {}: {:.6f} | Acc: {:.2f}%".format(epoch, train_loss, train_acc*100))
 
-                running_loss += loss.item()
+        # Validate the model
+        val_loss, val_acc = _val_epoch(model, criterion, val_loader, device)
 
-                correct = (output.argmax(1) == labels).sum().item()
-                train_acc = correct / len(images)
+        writer.add_scalars('Loss', {'val': val_loss}, epoch)
+        writer.add_scalars('Accuracy', {'val': val_acc}, epoch)
+        logger.info("Average Validation Loss of Epoch {}: {:.6f} | Acc: {:.2f}%".format(epoch, val_loss, val_acc*100))
 
-                running_acc += train_acc
-
-                tepoch.set_postfix(loss=loss.item(), accuracy=train_acc)
-
-        # eval mode for predictions
-        model.eval()
-
-        # turn off gradients for val
-        with torch.no_grad():
-            val_loss, val_acc, val_metrics = val(model, val_loader, criterion, device)
-
-        train_loss_store.append(running_loss/len(train_loader))
-        train_acc_store.append(running_acc/len(train_loader))
-        val_loss_store.append(val_loss)
-        val_acc_store.append(val_acc)
-        val_metrics_store.append(val_metrics)
-
-        print(f"Epoch: {epoch}/{no_of_epochs} - ",
-              f"Training Loss: {train_loss_store[-1]:.3f} - ",
-              f"Training Accuracy: {train_acc_store[-1]:.3f} - ",
-              f"Val Loss: {val_loss_store[-1]:.3f} - ",
-              f"Val Accuracy: {val_acc_store[-1]:.3f} - ")
-
-        if save_dir != None:
+        if save_dir:
             if save_checkpoint:
                 torch.save({
                     'epoch': epoch,
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(),
                     'scheduler_state_dict': scheduler.state_dict(),
-                    'loss': loss,
+                    'train_loss': train_loss,
+                    'val_loss': val_loss,
+                    'train_acc': train_acc,
+                    'val_acc': val_acc,
                 }, f"{save_dir}/{epoch}-checkpoint.pt")
             else:
                 torch.save(model.state_dict(), f"{save_dir}/{epoch}.pt")
-        
-        # if early_stopper.stop(val_loss_store[-1]):
-        #     print("Model has overfit, early stopping...")
-        #     break
 
-        if lr_scheduler:
-            scheduler.step(val_loss_store[-1])
-        
-        running_loss = 0
-        running_acc = 0
+        # Save model
+        logger.info(f"Epoch {epoch} Model Saved".center(60, '#'))
 
-    print(f"Run time: {(time.time() - start)/60:.3f} min")
-    
-    return train_loss_store, train_acc_store, val_loss_store, val_acc_store, val_metrics_store #, preci_store, recall_store, f1_store
+        if early_stopper.stop(val_loss):
+            logger.info("Model has overfit, early stopping...")
+            break
+        
+        if use_scheduler:
+            scheduler.step(val_loss)
+
+    logger.info("Training Finished".center(60, '#'))
+
+    return model

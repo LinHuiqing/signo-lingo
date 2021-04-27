@@ -16,3 +16,4 @@ dependencies:
   - av
   - jupyterlab
   - scikit-learn
+  - pytorch-model-summary

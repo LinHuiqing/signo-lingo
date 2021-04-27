@@ -12,7 +12,8 @@ class ConvBlock(nn.Module):
                  channel_out, 
                  activation_fn, 
                  use_batchnorm, 
-                 kernel_size = 3):
+                 pool:str='max_2',
+                 kernel_size:int=3):
         
         super(ConvBlock, self).__init__()
 
@@ -21,8 +22,8 @@ class ConvBlock(nn.Module):
 
         self.use_batchnorm = use_batchnorm
         if self.use_batchnorm:
-            self.batchnorm1 = nn.BatchNorm2d(channel_out)
-            self.batchnorm2 = nn.BatchNorm2d(channel_out)
+            self.batchnorm1 = nn.BatchNorm2d(channel_out, momentum=0.01)
+            self.batchnorm2 = nn.BatchNorm2d(channel_out, momentum=0.01)
         
         if activation_fn == "relu":
             self.a_fn = nn.ReLU()
@@ -32,6 +33,11 @@ class ConvBlock(nn.Module):
             self.a_fn = nn.PReLU()
         else:
             raise ValueError("please use a valid activation function argument ('relu'; 'leaky_relu'; 'param_relu')")
+
+        if pool == "max_2":
+            self.pool = nn.MaxPool2d(2)
+        elif pool == "adap":
+            self.pool = nn.AdaptiveAvgPool2d(1)
     
     def forward(self, x):
         out = self.conv1(x)
@@ -43,9 +49,10 @@ class ConvBlock(nn.Module):
         if self.use_batchnorm:
             out = self.batchnorm2(out)
         out = self.a_fn(out)
+        out = self.pool(out)
         return out
 
-class CNN(nn.Module):
+class CNN_Encoder(nn.Module):
     def __init__(self, 
                  channel_out, 
                  n_layers, 
@@ -53,37 +60,38 @@ class CNN(nn.Module):
                  use_batchnorm=True, 
                  channel_in=3):
         
-        super(CNN, self).__init__()
+        super(CNN_Encoder, self).__init__()
 
         channels = [64, 64, 128, 256, 512]
 
-        if n_layers < 1 or n_layers >= len(channels):
+        if n_layers < 2 or n_layers > len(channels):
             raise ValueError(f"please use a valid int for the n_layers param (1-{len(channels)-1})")
 
         self.conv1 = nn.Conv2d(channel_in, channels[0], 3, stride=2)
         self.maxpool = nn.MaxPool2d(3, 2)
 
         layers =  OrderedDict()
-        for i in range(n_layers):
+        for i in range(n_layers-2):
             layers[str(i)] = ConvBlock(channels[i], channels[i+1], intermediate_act_fn, use_batchnorm=use_batchnorm)
         
         self.layers = nn.Sequential(layers)
 
-        pool_size = 20
-        self.avgpool = nn.AdaptiveAvgPool2d(pool_size)
+        self.conv2 = ConvBlock(channels[n_layers-2], channels[n_layers-1], intermediate_act_fn, use_batchnorm=use_batchnorm, pool="adap")
+
+        pool_size = 1
         
-        fc_in = channels[n_layers] * pool_size * pool_size
+        fc_in = channels[n_layers-1] * pool_size * pool_size
         self.fc = nn.Linear(fc_in, channel_out)
         
     def forward(self, x):
         out = self.conv1(x)
         out = self.layers(out)
-        out = self.avgpool(out)
+        out = self.conv2(out)
         out = torch.flatten(out, 1)
         out = self.fc(out)
         return out
 
-class RNN(nn.Module):
+class LSTM_Decoder(nn.Module):
 
     def __init__(self, 
                  embed_dim, 
@@ -94,7 +102,7 @@ class RNN(nn.Module):
                  bidirectional=False, 
                  device="cuda"):
         
-        super(RNN, self).__init__()
+        super(LSTM_Decoder, self).__init__()
 
         self.num_layers = n_layers
         self.hidden_dim = hidden_dim
@@ -132,12 +140,130 @@ class RNN(nn.Module):
         h = torch.zeros(h_0_size, x.size(0), self.hidden_dim).to(self.device)
         c = torch.zeros(c_0_size, x.size(0), self.hidden_dim).to(self.device)
 
+        self.lstm.flatten_parameters()
+
         # Propagate input through LSTM
         output, (h, c) = self.lstm(x, (h, c)) #lstm with input, hidden, and internal state
-        # hn = hn.view(-1, self.hidden_size) #reshaping the data for Dense layer next
         
-        last_out = output[:, -1, :]
-        out = self.a_fn(last_out)
+        out = output[:, -1, :]
+
+        out = self.fc1(out)
+        
+        return out
+
+class GRU_Decoder(nn.Module):
+
+    def __init__(self, 
+                 embed_dim, 
+                 hidden_dim, 
+                 channel_out, 
+                 n_layers, 
+                 intermediate_act_fn="relu", 
+                 bidirectional=False, 
+                 device="cuda"):
+        
+        super(GRU_Decoder, self).__init__()
+
+        self.num_layers = n_layers
+        self.hidden_dim = hidden_dim
+        self.device = device
+        self.bidirectional = bidirectional
+
+        self.gru = nn.GRU(embed_dim, 
+                            self.hidden_dim, 
+                            num_layers=self.num_layers, 
+                            bidirectional=self.bidirectional, 
+                            batch_first=True)
+
+        if self.bidirectional:
+            fc1_in = self.hidden_dim * 2
+        else:
+            fc1_in = self.hidden_dim
+        self.fc1 =  nn.Linear(fc1_in, channel_out) #fully connected 1
+        # self.fc2 = nn.Linear(128, channel_out) #fully connected last layer
+
+        if intermediate_act_fn == "relu":
+            self.a_fn = nn.ReLU()
+        elif intermediate_act_fn == "leaky_relu":
+            self.a_fn = nn.LeakyReLU()
+        elif intermediate_act_fn == "param_relu":
+            self.a_fn = nn.PReLU()
+        else:
+            raise ValueError("please use a valid activation function argument ('relu'; 'leaky_relu'; 'param_relu')")
+
+    def forward(self, x):
+        
+        if self.bidirectional:
+            h_0_size = self.num_layers * 2
+        else:
+            h_0_size = self.num_layers
+        h = torch.zeros(h_0_size, x.size(0), self.hidden_dim).to(self.device)
+
+        self.gru.flatten_parameters()
+
+        # Propagate input through LSTM
+        output, h = self.gru(x, h) #lstm with input, hidden, and internal state
+        
+        out = output[:, -1, :]
+
+        out = self.fc1(out)
+        
+        return out
+
+class RNN_Decoder(nn.Module):
+
+    def __init__(self, 
+                 embed_dim, 
+                 hidden_dim, 
+                 channel_out, 
+                 n_layers, 
+                 intermediate_act_fn="relu", 
+                 bidirectional=False, 
+                 device="cuda"):
+        
+        super(RNN_Decoder, self).__init__()
+
+        self.num_layers = n_layers
+        self.hidden_dim = hidden_dim
+        self.device = device
+        self.bidirectional = bidirectional
+
+        self.rnn = nn.RNN(embed_dim, 
+                            self.hidden_dim, 
+                            num_layers=self.num_layers, 
+                            bidirectional=self.bidirectional, 
+                            batch_first=True)
+
+        if self.bidirectional:
+            fc1_in = self.hidden_dim * 2
+        else:
+            fc1_in = self.hidden_dim
+        self.fc1 =  nn.Linear(fc1_in, channel_out) #fully connected 1
+        # self.fc2 = nn.Linear(128, channel_out) #fully connected last layer
+
+        if intermediate_act_fn == "relu":
+            self.a_fn = nn.ReLU()
+        elif intermediate_act_fn == "leaky_relu":
+            self.a_fn = nn.LeakyReLU()
+        elif intermediate_act_fn == "param_relu":
+            self.a_fn = nn.PReLU()
+        else:
+            raise ValueError("please use a valid activation function argument ('relu'; 'leaky_relu'; 'param_relu')")
+
+    def forward(self, x):
+        
+        if self.bidirectional:
+            h_0_size = self.num_layers * 2
+        else:
+            h_0_size = self.num_layers
+        h = torch.zeros(h_0_size, x.size(0), self.hidden_dim).to(self.device)
+
+        self.rnn.flatten_parameters()
+        
+        # Propagate input through LSTM
+        output, h = self.rnn(x, h) #lstm with input, hidden, and internal state
+        
+        out = output[:, -1, :]
         out = self.fc1(out)
         
         return out
@@ -192,6 +318,7 @@ class CNN_LSTM(nn.Module):
                  latent_size, 
                  n_cnn_layers, 
                  n_rnn_layers, 
+                 n_rnn_hidden_dim,
                  channel_in=3, 
                  cnn_act_fn="relu", 
                  rnn_act_fn="relu", 
@@ -201,56 +328,91 @@ class CNN_LSTM(nn.Module):
         
         super(CNN_LSTM, self).__init__()
 
-        self.CNN = CNN(latent_size, n_cnn_layers, intermediate_act_fn=cnn_act_fn, use_batchnorm=cnn_bn, channel_in=channel_in)
-        self.RNN = RNN(latent_size, 3, n_classes, n_rnn_layers, intermediate_act_fn=rnn_act_fn, bidirectional=bidirectional)
+        self.encoder = CNN_Encoder(latent_size, n_cnn_layers, intermediate_act_fn=cnn_act_fn, use_batchnorm=cnn_bn, channel_in=channel_in)
+        self.decoder = LSTM_Decoder(latent_size, n_rnn_hidden_dim, n_classes, n_rnn_layers, intermediate_act_fn=rnn_act_fn, bidirectional=bidirectional)
 
         self.dropout = nn.Dropout(p=dropout_rate)
-
-        self.softmax = nn.Softmax(dim=1)
 
     def forward(self, x):
         batch_size, timesteps, C, H, W = x.size()
 
         cnn_in = x.view(batch_size * timesteps, C, H, W)
-        latent_var = self.CNN(cnn_in)
+        latent_var = self.encoder(cnn_in)
 
         rnn_in = latent_var.view(batch_size, timesteps, -1)
         rnn_in = self.dropout(rnn_in)
-        out = self.RNN(rnn_in)
+        out = self.decoder(rnn_in)
 
-        out = self.softmax(out)
         return out
 
-class CNN_AttnRNN(nn.Module):
+class CNN_GRU(nn.Module):
 
     def __init__(self, 
                  n_classes, 
                  latent_size, 
                  n_cnn_layers, 
                  n_rnn_layers, 
+                 n_rnn_hidden_dim,
                  channel_in=3, 
                  cnn_act_fn="relu", 
                  rnn_act_fn="relu", 
+                 dropout_rate=0.1,
                  cnn_bn=False, 
                  bidirectional=False):
         
-        super(CNN_AttnRNN, self).__init__()
+        super(CNN_GRU, self).__init__()
 
-        self.CNN = CNN(latent_size, n_cnn_layers, intermediate_act_fn=cnn_act_fn, use_batchnorm=cnn_bn, channel_in=channel_in)
-        self.RNN = RNN(latent_size, 3, n_classes, n_rnn_layers, intermediate_act_fn=rnn_act_fn, bidirectional=bidirectional)
+        self.encoder = CNN_Encoder(latent_size, n_cnn_layers, intermediate_act_fn=cnn_act_fn, use_batchnorm=cnn_bn, channel_in=channel_in)
+        self.decoder = GRU_Decoder(latent_size, n_rnn_hidden_dim, n_classes, n_rnn_layers, intermediate_act_fn=rnn_act_fn, bidirectional=bidirectional)
 
-        self.softmax = nn.Softmax(dim=1)
+        self.dropout = nn.Dropout(p=dropout_rate)
 
     def forward(self, x):
+
         batch_size, timesteps, C, H, W = x.size()
 
         cnn_in = x.view(batch_size * timesteps, C, H, W)
-        latent_var = self.CNN(cnn_in)
+        latent_var = self.encoder(cnn_in)
 
         rnn_in = latent_var.view(batch_size, timesteps, -1)
-        out = self.RNN(rnn_in)
+        rnn_in = self.dropout(rnn_in)
+        out = self.decoder(rnn_in)
 
-        out = self.softmax(out)
+        return out
+
+class CNN_RNN(nn.Module):
+
+    def __init__(self, 
+                 n_classes, 
+                 latent_size, 
+                 n_cnn_layers, 
+                 n_rnn_layers, 
+                 n_rnn_hidden_dim,
+                 channel_in=3, 
+                 cnn_act_fn="relu", 
+                 rnn_act_fn="relu", 
+                 dropout_rate=0.1,
+                 cnn_bn=False, 
+                 bidirectional=False):
+        
+        super(CNN_RNN, self).__init__()
+
+        self.encoder = CNN_Encoder(latent_size, n_cnn_layers, intermediate_act_fn=cnn_act_fn, use_batchnorm=cnn_bn, channel_in=channel_in)
+        self.decoder = RNN_Decoder(latent_size, n_rnn_hidden_dim, n_classes, n_rnn_layers, intermediate_act_fn=rnn_act_fn, bidirectional=bidirectional)
+
+        self.dropout = nn.Dropout(p=dropout_rate)
+
+    def forward(self, x):
+
+        batch_size, timesteps, C, H, W = x.size()
+
+        cnn_in = x.view(batch_size * timesteps, C, H, W)
+        latent_var = self.encoder(cnn_in)
+
+        rnn_in = latent_var.view(batch_size, timesteps, -1)
+        rnn_in = self.dropout(rnn_in)
+        out = self.decoder(rnn_in)
+
         return out
 
 class ResNet_LSTM(nn.Module):
@@ -320,40 +482,6 @@ class VGG_LSTM(nn.Module):
 
         out = self.softmax(out)
         return out
-    
-# # source: https://github.com/pranoyr/cnn-lstm/blob/master/models/cnnlstm.py
-# import torch
-# import torch.nn as nn
-# import torchvision.models as models
-# from torch.nn.utils.rnn import pack_padded_sequence
-# import torch.nn.functional as F
-# from torchvision.models import resnet18, resnet101
-
-
-# class CNNLSTM(nn.Module):
-#     def __init__(self, 
-#                  num_classes, 
-#                  latent_size, 
-#                  lstm_hidden_size=256, 
-#                  lstm_n_layers=3):
-#         super(CNNLSTM, self).__init__()
-#         self.resnet = resnet101(pretrained=True)
-#         self.resnet.fc = nn.Sequential(nn.Linear(self.resnet.fc.in_features, latent_size))
-#         self.lstm = nn.LSTM(input_size=latent_size, hidden_size=lstm_hidden_size, num_layers=lstm_n_layers)
-#         self.fc1 = nn.Linear(lstm_hidden_size, 128)
-#         self.fc2 = nn.Linear(128, num_classes)
-       
-#     def forward(self, x_3d):
-#         hidden = None
-#         for t in range(x_3d.size(1)):
-#             with torch.no_grad():
-#                 x = self.resnet(x_3d[:, t, :, :, :])  
-#             out, hidden = self.lstm(x.unsqueeze(0), hidden)         
-
-#         x = self.fc1(out[-1, :, :])
-#         x = F.relu(x)
-#         x = self.fc2(x)
-#         return x
 
 # class TimeDistributed(nn.Module):
 #     def __init__(self, 
@@ -382,98 +510,3 @@ class VGG_LSTM(nn.Module):
 #             y = y.view(-1, x.size(1), y.size(-1))  # (timesteps, samples, output_size)
 
 #         return y
-
-"""
-source: https://github.com/0aqz0/SLR/blob/master/models/ConvLSTM.py
-Implementation of CNN+LSTM.
-"""
-class CRNN(nn.Module):
-    def __init__(self, sample_size=256, sample_duration=16, num_classes=100,
-                lstm_hidden_size=512, lstm_num_layers=1):
-        super(CRNN, self).__init__()
-        self.sample_size = sample_size
-        self.sample_duration = sample_duration
-        self.num_classes = num_classes
-
-        # network params
-        self.ch1, self.ch2, self.ch3, self.ch4 = 64, 128, 256, 512
-        self.k1, self.k2, self.k3, self.k4 = (7, 7), (3, 3), (3, 3), (3, 3)
-        self.s1, self.s2, self.s3, self.s4 = (2, 2), (1, 1), (1, 1), (1, 1)
-        self.p1, self.p2, self.p3, self.p4 = (0, 0), (0, 0), (0, 0), (0, 0)
-        self.d1, self.d2, self.d3, self.d4 = (1, 1), (1, 1), (1, 1), (1, 1)
-        self.lstm_input_size = self.ch4
-        self.lstm_hidden_size = lstm_hidden_size
-        self.lstm_num_layers = lstm_num_layers
-
-        # network architecture
-        # in_channels=3 for rgb
-        self.conv1 = nn.Sequential(
-            nn.Conv2d(in_channels=3, out_channels=self.ch1, kernel_size=self.k1, stride=self.s1, padding=self.p1, dilation=self.d1),
-            nn.BatchNorm2d(self.ch1, momentum=0.01),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(in_channels=self.ch1, out_channels=self.ch1, kernel_size=1, stride=1),
-            nn.MaxPool2d(kernel_size=2),
-        )
-        self.conv2 = nn.Sequential(
-            nn.Conv2d(in_channels=self.ch1, out_channels=self.ch2, kernel_size=self.k2, stride=self.s2, padding=self.p2, dilation=self.d2),
-            nn.BatchNorm2d(self.ch2, momentum=0.01),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(in_channels=self.ch2, out_channels=self.ch2, kernel_size=1, stride=1),
-            nn.MaxPool2d(kernel_size=2),
-        )
-        self.conv3 = nn.Sequential(
-            nn.Conv2d(in_channels=self.ch2, out_channels=self.ch3, kernel_size=self.k3, stride=self.s3, padding=self.p3, dilation=self.d3),
-            nn.BatchNorm2d(self.ch3, momentum=0.01),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(in_channels=self.ch3, out_channels=self.ch3, kernel_size=1, stride=1),
-            nn.MaxPool2d(kernel_size=2),
-        )
-        self.conv4 = nn.Sequential(
-            nn.Conv2d(in_channels=self.ch3, out_channels=self.ch4, kernel_size=self.k4, stride=self.s4, padding=self.p4, dilation=self.d4),
-            nn.BatchNorm2d(self.ch4, momentum=0.01),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(in_channels=self.ch4, out_channels=self.ch4, kernel_size=1, stride=1),
-            nn.AdaptiveAvgPool2d((1,1)),
-        )
-        self.lstm = nn.LSTM(
-            input_size=self.lstm_input_size,
-            hidden_size=self.lstm_hidden_size,
-            num_layers=self.lstm_num_layers,
-            batch_first=True,
-        )
-        self.fc1 = nn.Linear(self.lstm_hidden_size, self.num_classes)
-
-    def forward(self, x):
-        # print("---")
-        # CNN
-        cnn_embed_seq = []
-        # print(x.shape)
-        # orig x: (batch_size, channel, t, h, w)
-        # print(x.shape)
-        # x: (batch_size, t, channel, h, w)
-        for t in range(x.size(1)):
-            # Conv
-            out = self.conv1(x[:, t, :, :, :])
-            out = self.conv2(out)
-            out = self.conv3(out)
-            out = self.conv4(out)
-            # print(out.shape)
-            out = out.view(out.size(0), -1)
-            # print(out.shape)
-            cnn_embed_seq.append(out)
-
-        cnn_embed_seq = torch.stack(cnn_embed_seq, dim=0)
-        # print(cnn_embed_seq.shape)
-        # batch first
-        cnn_embed_seq = cnn_embed_seq.transpose_(0, 1)
-        # print(cnn_embed_seq.shape)
-
-        # LSTM
-        # use faster code paths
-        self.lstm.flatten_parameters()
-        out, (h_n, c_n) = self.lstm(cnn_embed_seq, None)
-        # MLP
-        # out: (batch, seq, feature), choose the last time step
-        out = self.fc1(out[:, -1, :])
-
-        return out
