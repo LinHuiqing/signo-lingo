@@ -38,6 +38,10 @@ class ConvBlock(nn.Module):
             self.pool = nn.MaxPool2d(2)
         elif pool == "adap":
             self.pool = nn.AdaptiveAvgPool2d(1)
+        elif not pool:
+            self.pool = pool
+        else:
+            raise ValueError("please use a valid pool argument ('max_2', 'adap', None)")
     
     def forward(self, x):
         out = self.conv1(x)
@@ -49,7 +53,8 @@ class ConvBlock(nn.Module):
         if self.use_batchnorm:
             out = self.batchnorm2(out)
         out = self.a_fn(out)
-        out = self.pool(out)
+        if self.pool:
+            out = self.pool(out)
         return out
 
 class CNN_Encoder(nn.Module):
@@ -62,26 +67,39 @@ class CNN_Encoder(nn.Module):
         
         super(CNN_Encoder, self).__init__()
 
-        channels = [64, 64, 128, 256, 512]
+        channels = [64, 128, 256, 512]
 
-        if n_layers < 2 or n_layers > len(channels):
-            raise ValueError(f"please use a valid int for the n_layers param (1-{len(channels)-1})")
+        if n_layers < 1 or n_layers > len(channels)*2:
+            raise ValueError(f"please use a valid int for the n_layers param (1-{len(channels)*2})")
+        
+        n_repeat = remainder = max(0, n_layers - len(channels))
+        pointer = 0
 
         self.conv1 = nn.Conv2d(channel_in, channels[0], 3, stride=2)
         self.maxpool = nn.MaxPool2d(3, 2)
 
         layers =  OrderedDict()
-        for i in range(n_layers-2):
-            layers[str(i)] = ConvBlock(channels[i], channels[i+1], intermediate_act_fn, use_batchnorm=use_batchnorm)
-        
+
+        if n_layers > 1:
+            layers[str(0)] = ConvBlock(channels[0], channels[0], intermediate_act_fn, use_batchnorm=use_batchnorm)
+
+        for i in range(1, n_layers-1):
+            if i % 2 == 0 and remainder > 0:
+                layers[str(i)] = ConvBlock(channels[pointer], channels[pointer], intermediate_act_fn, use_batchnorm=use_batchnorm, pool=None)
+                remainder -= 1
+            else:
+                layers[str(i)] = ConvBlock(channels[pointer], channels[min(pointer+1, len(channels)-1)], intermediate_act_fn, use_batchnorm=use_batchnorm)
+                pointer += 1
+
         self.layers = nn.Sequential(layers)
-
-        self.conv2 = ConvBlock(channels[n_layers-2], channels[n_layers-1], intermediate_act_fn, use_batchnorm=use_batchnorm, pool="adap")
-
-        pool_size = 1
+        if n_layers < len(channels):
+            conv_to_fc = channels[n_layers-1-n_repeat]
+        else:
+            conv_to_fc = channels[-1]
         
-        fc_in = channels[n_layers-1] * pool_size * pool_size
-        self.fc = nn.Linear(fc_in, channel_out)
+        self.conv2 = ConvBlock(channels[n_layers-2-n_repeat], conv_to_fc, intermediate_act_fn, use_batchnorm=use_batchnorm, pool="adap")
+        
+        self.fc = nn.Linear(conv_to_fc, channel_out)
         
     def forward(self, x):
         out = self.conv1(x)
@@ -510,3 +528,45 @@ class VGG_LSTM(nn.Module):
 #             y = y.view(-1, x.size(1), y.size(-1))  # (timesteps, samples, output_size)
 
 #         return y
+
+# """
+# source: https://github.com/adeveloperdiary/DeepLearning_MiniProjects/blob/master/Neural_Machine_Translation/NMT_RNN_with_Attention_train.py
+# """
+# class Attention(nn.Module):
+#     def __init__(self, encoder_hidden_dim, decoder_hidden_dim):
+#         super().__init__()
+
+#         # The input dimension will the the concatenation of
+#         # encoder_hidden_dim (hidden) and  decoder_hidden_dim(encoder_outputs)
+#         self.attn_hidden_vector = nn.Linear(encoder_hidden_dim + decoder_hidden_dim, decoder_hidden_dim)
+
+#         # We need source len number of values for n batch as the dimension
+#         # of the attention weights. The attn_hidden_vector will have the
+#         # dimension of [source len, batch size, decoder hidden dim]
+#         # If we set the output dim of this Linear layer to 1 then the
+#         # effective output dimension will be [source len, batch size]
+#         self.attn_scoring_fn = nn.Linear(decoder_hidden_dim, 1, bias=False)
+
+#     def forward(self, hidden, encoder_outputs):
+#         # hidden = [1, batch size, decoder hidden dim]
+#         src_len = encoder_outputs.shape[0]
+
+#         # We need to calculate the attn_hidden for each source words.
+#         # Instead of repeating this using a loop, we can duplicate
+#         # hidden src_len number of times and perform the operations.
+#         hidden = hidden.repeat(src_len, 1, 1)
+
+#         # Calculate Attention Hidden values
+#         attn_hidden = torch.tanh(self.attn_hidden_vector(torch.cat((hidden, encoder_outputs), dim=2)))
+
+#         # Calculate the Scoring function. Remove 3rd dimension.
+#         attn_scoring_vector = self.attn_scoring_fn(attn_hidden).squeeze(2)
+
+#         # The attn_scoring_vector has dimension of [source len, batch size]
+#         # Since we need to calculate the softmax per record in the batch
+#         # we will switch the dimension to [batch size,source len]
+#         attn_scoring_vector = attn_scoring_vector.permute(1, 0)
+
+#         # Softmax function for normalizing the weights to
+#         # probability distribution
+#         return F.softmax(attn_scoring_vector, dim=1)
