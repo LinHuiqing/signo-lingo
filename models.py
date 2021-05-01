@@ -475,17 +475,20 @@ class VGG_LSTM(nn.Module):
     def __init__(self, 
                  n_classes, 
                  latent_size, 
-                 n_rnn_layers, 
-                 rnn_act_fn="relu", 
+                 n_rnn_layers,
+                 n_rnn_hidden_dim,
+                 rnn_act_fn="relu",
+                 dropout_rate=0.1,
                  bidirectional=False):
         
         super(VGG_LSTM, self).__init__()
         
-        self.CNN = vgg11(pretrained=True)
+        self.CNN = vgg11(pretrained=True, progress=False)
         self.CNN.classifier[6] = nn.Linear(4096, latent_size)
 
         # self.CNN = CNN(latent_size, n_cnn_layers, intermediate_act_fn=cnn_act_fn, use_batchnorm=cnn_bn, channel_in=channel_in)
-        self.RNN = RNN(latent_size, 3, n_classes, n_rnn_layers, intermediate_act_fn=rnn_act_fn, bidirectional=bidirectional)
+        self.decoder = LSTM_Decoder(latent_size, n_rnn_hidden_dim, n_classes, n_rnn_layers, intermediate_act_fn=rnn_act_fn, bidirectional=bidirectional)
+        self.dropout = nn.Dropout(p=dropout_rate)
 
         self.softmax = nn.Softmax(dim=1)
 
@@ -496,9 +499,9 @@ class VGG_LSTM(nn.Module):
         latent_var = self.CNN(cnn_in)
 
         rnn_in = latent_var.view(batch_size, timesteps, -1)
-        out = self.RNN(rnn_in)
-
-        out = self.softmax(out)
+        rnn_in = self.dropout(rnn_in)
+        out = self.decoder(rnn_in)
+        # out = self.softmax(out)
         return out
 
 # class TimeDistributed(nn.Module):
