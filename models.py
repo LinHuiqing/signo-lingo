@@ -313,7 +313,7 @@ class CNN_LSTM(nn.Module):
                  dropout_rate=0.1,
                  cnn_bn=False, 
                  bidirectional=False, 
-                 attention=AttentionMod.NONE):
+                 attention=False):
         
         super(CNN_LSTM, self).__init__()
 
