@@ -3,7 +3,8 @@ from collections import OrderedDict
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
-from torchvision.models import resnet18, vgg11
+from torchvision.models import resnet18, resnet101, vgg11
+import torch.nn.functional as F
 
 
 class ConvBlock(nn.Module):
@@ -118,6 +119,7 @@ class LSTM_Decoder(nn.Module):
                  n_layers, 
                  intermediate_act_fn="relu", 
                  bidirectional=False, 
+                 attention=False,
                  device="cuda"):
         
         super(LSTM_Decoder, self).__init__()
@@ -126,6 +128,7 @@ class LSTM_Decoder(nn.Module):
         self.hidden_dim = hidden_dim
         self.device = device
         self.bidirectional = bidirectional
+        self.attention = attention
 
         self.lstm = nn.LSTM(embed_dim, 
                             self.hidden_dim, 
@@ -148,6 +151,9 @@ class LSTM_Decoder(nn.Module):
             self.a_fn = nn.PReLU()
         else:
             raise ValueError("please use a valid activation function argument ('relu'; 'leaky_relu'; 'param_relu')")
+        
+        if self.attention:
+            self.attention_layer = nn.Linear(2 * self.hidden_dim if self.bidirectional else self.hidden_dim, 1)
 
     def forward(self, x):
         
@@ -161,13 +167,17 @@ class LSTM_Decoder(nn.Module):
         self.lstm.flatten_parameters()
 
         # Propagate input through LSTM
-        output, (h, c) = self.lstm(x, (h, c)) #lstm with input, hidden, and internal state
+        out, (h, c) = self.lstm(x, (h, c)) #lstm with input, hidden, and internal state
         
-        out = output[:, -1, :]
-
-        out = self.fc1(out)
+        if self.attention:
+            attention_w = F.softmax(self.attention_layer(out).squeeze(-1), dim=-1)
+            
+            out = torch.sum(attention_w.unsqueeze(-1) * out, dim=1)
+        else:
+            out = out[:, -1, :]
+            out = self.fc1(out)
         
-        return out
+        return out, h
 
 class GRU_Decoder(nn.Module):
 
@@ -237,6 +247,7 @@ class RNN_Decoder(nn.Module):
                  n_layers, 
                  intermediate_act_fn="relu", 
                  bidirectional=False, 
+                 attention=False,
                  device="cuda"):
         
         super(RNN_Decoder, self).__init__()
@@ -245,6 +256,7 @@ class RNN_Decoder(nn.Module):
         self.hidden_dim = hidden_dim
         self.device = device
         self.bidirectional = bidirectional
+        self.attention = attention
 
         self.rnn = nn.RNN(embed_dim, 
                             self.hidden_dim, 
@@ -279,55 +291,13 @@ class RNN_Decoder(nn.Module):
         self.rnn.flatten_parameters()
         
         # Propagate input through LSTM
-        output, h = self.rnn(x, h) #lstm with input, hidden, and internal state
+        out, h = self.rnn(x, h) #lstm with input, hidden, and internal state
         
-        out = output[:, -1, :]
-        out = self.fc1(out)
+        if not self.attention:
+            out = out[:, -1, :]
+            out = self.fc1(out)
         
-        return out
-
-# class AttnDecoderRNN(nn.Module):
-    
-#     def __init__(self, 
-#                  hidden_size, 
-#                  output_size, 
-#                  max_length=30, 
-#                  dropout_p=0.1):
-        
-#         super(AttnDecoderRNN, self).__init__()
-        
-#         self.hidden_size = hidden_size
-#         self.output_size = output_size
-#         self.dropout_p = dropout_p
-#         self.max_length = max_length
-
-#         # self.embedding = nn.Embedding(self.output_size, self.hidden_size)
-#         self.attn = nn.Linear(self.hidden_size * 2, self.max_length)
-#         self.attn_combine = nn.Linear(self.hidden_size * 2, self.hidden_size)
-#         self.dropout = nn.Dropout(self.dropout_p)
-#         self.gru = nn.GRU(self.hidden_size, self.hidden_size)
-#         self.out = nn.Linear(self.hidden_size, self.output_size)
-
-#     def forward(self, input, hidden, encoder_outputs):
-#         # embedded = self.embedding(input).view(1, 1, -1)
-#         embedded = self.dropout(embedded)
-
-#         attn_weights = F.softmax(
-#             self.attn(torch.cat((embedded[0], hidden[0]), 1)), dim=1)
-#         attn_applied = torch.bmm(attn_weights.unsqueeze(0),
-#                                  encoder_outputs.unsqueeze(0))
-
-#         output = torch.cat((embedded[0], attn_applied[0]), 1)
-#         output = self.attn_combine(output).unsqueeze(0)
-
-#         output = F.relu(output)
-#         output, hidden = self.gru(output, hidden)
-
-#         output = F.log_softmax(self.out(output[0]), dim=1)
-#         return output, hidden, attn_weights
-
-#     def initHidden(self):
-#         return torch.zeros(1, 1, self.hidden_size, device=device)
+        return out, h
 
 class CNN_LSTM(nn.Module):
 
@@ -342,12 +312,25 @@ class CNN_LSTM(nn.Module):
                  rnn_act_fn="relu", 
                  dropout_rate=0.1,
                  cnn_bn=False, 
-                 bidirectional=False):
+                 bidirectional=False, 
+                 attention=AttentionMod.NONE):
         
         super(CNN_LSTM, self).__init__()
 
-        self.encoder = CNN_Encoder(latent_size, n_cnn_layers, intermediate_act_fn=cnn_act_fn, use_batchnorm=cnn_bn, channel_in=channel_in)
-        self.decoder = LSTM_Decoder(latent_size, n_rnn_hidden_dim, n_classes, n_rnn_layers, intermediate_act_fn=rnn_act_fn, bidirectional=bidirectional)
+        self.attention = attention
+
+        self.encoder = CNN_Encoder(latent_size, 
+                                   n_cnn_layers, 
+                                   intermediate_act_fn=cnn_act_fn, 
+                                   use_batchnorm=cnn_bn, 
+                                   channel_in=channel_in)
+        self.decoder = LSTM_Decoder(latent_size, 
+                                    n_rnn_hidden_dim, 
+                                    n_classes, 
+                                    n_rnn_layers, 
+                                    intermediate_act_fn=rnn_act_fn, 
+                                    bidirectional=bidirectional, 
+                                    attention=attention)
 
         self.dropout = nn.Dropout(p=dropout_rate)
 
@@ -359,7 +342,7 @@ class CNN_LSTM(nn.Module):
 
         rnn_in = latent_var.view(batch_size, timesteps, -1)
         rnn_in = self.dropout(rnn_in)
-        out = self.decoder(rnn_in)
+        out, h = self.decoder(rnn_in)
 
         return out
 
@@ -453,8 +436,7 @@ class ResNet_LSTM(nn.Module):
         
         self.CNN.fc = nn.Sequential(nn.Linear(self.CNN.fc.in_features, latent_size))
 
-        # self.CNN = CNN(latent_size, n_cnn_layers, intermediate_act_fn=cnn_act_fn, use_batchnorm=cnn_bn, channel_in=channel_in)
-        self.RNN = RNN(latent_size, 3, n_classes, n_rnn_layers, intermediate_act_fn=rnn_act_fn, bidirectional=bidirectional)
+        self.LSTM = LSTM_Decoder(latent_size, 3, n_classes, n_rnn_layers, intermediate_act_fn=rnn_act_fn, bidirectional=bidirectional)
 
         self.softmax = nn.Softmax(dim=1)
 
@@ -486,7 +468,6 @@ class VGG_LSTM(nn.Module):
         self.CNN = vgg11(pretrained=True, progress=False)
         self.CNN.classifier[6] = nn.Linear(4096, latent_size)
 
-        # self.CNN = CNN(latent_size, n_cnn_layers, intermediate_act_fn=cnn_act_fn, use_batchnorm=cnn_bn, channel_in=channel_in)
         self.decoder = LSTM_Decoder(latent_size, n_rnn_hidden_dim, n_classes, n_rnn_layers, intermediate_act_fn=rnn_act_fn, bidirectional=bidirectional)
         self.dropout = nn.Dropout(p=dropout_rate)
 
@@ -503,73 +484,3 @@ class VGG_LSTM(nn.Module):
         out = self.decoder(rnn_in)
         # out = self.softmax(out)
         return out
-
-# class TimeDistributed(nn.Module):
-#     def __init__(self, 
-#                  module, 
-#                  batch_first=False):
-        
-#         super(TimeDistributed, self).__init__()
-
-#         self.module = module
-#         self.batch_first = batch_first
-
-#     def forward(self, x):
-
-#         if len(x.size()) <= 2:
-#             return self.module(x)
-
-#         # Squash samples and timesteps into a single axis
-#         x_reshape = x.contiguous().view(-1, x.size(-1))  # (samples * timesteps, input_size)
-
-#         y = self.module(x_reshape)
-
-#         # We have to reshape Y
-#         if self.batch_first:
-#             y = y.contiguous().view(x.size(0), -1, y.size(-1))  # (samples, timesteps, output_size)
-#         else:
-#             y = y.view(-1, x.size(1), y.size(-1))  # (timesteps, samples, output_size)
-
-#         return y
-
-# """
-# source: https://github.com/adeveloperdiary/DeepLearning_MiniProjects/blob/master/Neural_Machine_Translation/NMT_RNN_with_Attention_train.py
-# """
-# class Attention(nn.Module):
-#     def __init__(self, encoder_hidden_dim, decoder_hidden_dim):
-#         super().__init__()
-
-#         # The input dimension will the the concatenation of
-#         # encoder_hidden_dim (hidden) and  decoder_hidden_dim(encoder_outputs)
-#         self.attn_hidden_vector = nn.Linear(encoder_hidden_dim + decoder_hidden_dim, decoder_hidden_dim)
-
-#         # We need source len number of values for n batch as the dimension
-#         # of the attention weights. The attn_hidden_vector will have the
-#         # dimension of [source len, batch size, decoder hidden dim]
-#         # If we set the output dim of this Linear layer to 1 then the
-#         # effective output dimension will be [source len, batch size]
-#         self.attn_scoring_fn = nn.Linear(decoder_hidden_dim, 1, bias=False)
-
-#     def forward(self, hidden, encoder_outputs):
-#         # hidden = [1, batch size, decoder hidden dim]
-#         src_len = encoder_outputs.shape[0]
-
-#         # We need to calculate the attn_hidden for each source words.
-#         # Instead of repeating this using a loop, we can duplicate
-#         # hidden src_len number of times and perform the operations.
-#         hidden = hidden.repeat(src_len, 1, 1)
-
-#         # Calculate Attention Hidden values
-#         attn_hidden = torch.tanh(self.attn_hidden_vector(torch.cat((hidden, encoder_outputs), dim=2)))
-
-#         # Calculate the Scoring function. Remove 3rd dimension.
-#         attn_scoring_vector = self.attn_scoring_fn(attn_hidden).squeeze(2)
-
-#         # The attn_scoring_vector has dimension of [source len, batch size]
-#         # Since we need to calculate the softmax per record in the batch
-#         # we will switch the dimension to [batch size,source len]
-#         attn_scoring_vector = attn_scoring_vector.permute(1, 0)
-
-#         # Softmax function for normalizing the weights to
-#         # probability distribution
-#         return F.softmax(attn_scoring_vector, dim=1)
