@@ -175,7 +175,8 @@ class LSTM_Decoder(nn.Module):
             out = torch.sum(attention_w.unsqueeze(-1) * out, dim=1)
         else:
             out = out[:, -1, :]
-            out = self.fc1(out)
+        
+        out = self.fc1(out)
         
         return out, h
 
