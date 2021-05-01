@@ -175,7 +175,7 @@ class LSTM_Decoder(nn.Module):
             out = torch.sum(attention_w.unsqueeze(-1) * out, dim=1)
         else:
             out = out[:, -1, :]
-        
+            
         out = self.fc1(out)
         
         return out, h
@@ -314,7 +314,8 @@ class CNN_LSTM(nn.Module):
                  dropout_rate=0.1,
                  cnn_bn=False, 
                  bidirectional=False, 
-                 attention=False):
+                 attention=False,
+                 device="cuda"):
         
         super(CNN_LSTM, self).__init__()
 
@@ -331,7 +332,8 @@ class CNN_LSTM(nn.Module):
                                     n_rnn_layers, 
                                     intermediate_act_fn=rnn_act_fn, 
                                     bidirectional=bidirectional, 
-                                    attention=attention)
+                                    attention=attention,
+                                    device=device)
 
         self.dropout = nn.Dropout(p=dropout_rate)
 
