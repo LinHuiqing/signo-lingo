@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+  <title>Sign language</title>
+  <h1>Signo Lingo</h1>
+  <h2>Upload file for model to predict</h2>
+  <body>
+    <form action = "http://localhost:5000/" method = "POST" 
+        enctype = "multipart/form-data">
+        <input type = "file" name = "file" />
+        <input type = "submit"/>
+    </form>
+    <p>
+      {% with messages = get_flashed_messages() %}
+        {% if messages %}
+        <ul>
+        {% for message in messages %}
+          <li>{{ message }}</li>
+        {% endfor %}
+        </ul>
+        {% endif %}
+      {% endwith %}
+    </p>
+    {% if filename %}
+      <video width="320" height="240" controls>
+        <source src={{ url_for('static', filename=filename) }} type="video/mp4">
+        Your browser does not support the video tag.
+      </video>
+    {% endif %}
+  </body>
+</html>

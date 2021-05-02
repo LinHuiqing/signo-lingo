@@ -1,0 +1,66 @@
+######################Training Started######################
+Epoch 1
+Average Training Loss of Epoch 1: 2.304889 | Acc: 10.78%
+Average Validation Loss of Epoch 1: 2.302759 | Acc: 9.79%
+####################Epoch 1 Model Saved#####################
+Epoch 2
+Average Training Loss of Epoch 2: 2.292565 | Acc: 13.92%
+Average Validation Loss of Epoch 2: 2.306701 | Acc: 9.79%
+####################Epoch 2 Model Saved#####################
+Increment early stopper to 1 because val loss (2.306700740541731) is greater than threshold (2.302758771546033)
+Epoch 3
+Average Training Loss of Epoch 3: 2.274876 | Acc: 17.70%
+Average Validation Loss of Epoch 3: 2.302201 | Acc: 10.82%
+####################Epoch 3 Model Saved#####################
+Epoch 4
+Average Training Loss of Epoch 4: 2.255497 | Acc: 25.26%
+Average Validation Loss of Epoch 4: 2.306129 | Acc: 12.37%
+####################Epoch 4 Model Saved#####################
+Increment early stopper to 1 because val loss (2.3061293144615327) is greater than threshold (2.3022005460700212)
+Epoch 5
+Average Training Loss of Epoch 5: 2.214836 | Acc: 34.19%
+Average Validation Loss of Epoch 5: 2.341705 | Acc: 10.31%
+####################Epoch 5 Model Saved#####################
+Increment early stopper to 2 because val loss (2.3417052103548635) is greater than threshold (2.3022005460700212)
+Epoch 6
+Average Training Loss of Epoch 6: 2.118549 | Acc: 41.59%
+Average Validation Loss of Epoch 6: 2.611054 | Acc: 8.76%
+####################Epoch 6 Model Saved#####################
+Increment early stopper to 3 because val loss (2.6110539022757084) is greater than threshold (2.3022005460700212)
+Epoch 7
+Average Training Loss of Epoch 7: 1.894055 | Acc: 45.53%
+Average Validation Loss of Epoch 7: 2.612437 | Acc: 11.34%
+####################Epoch 7 Model Saved#####################
+Increment early stopper to 4 because val loss (2.61243652081003) is greater than threshold (2.3022005460700212)
+Epoch 8
+Average Training Loss of Epoch 8: 1.657114 | Acc: 54.71%
+Average Validation Loss of Epoch 8: 2.443591 | Acc: 7.22%
+####################Epoch 8 Model Saved#####################
+Increment early stopper to 5 because val loss (2.4435910278437087) is greater than threshold (2.3022005460700212)
+Epoch 9
+Average Training Loss of Epoch 9: 1.579311 | Acc: 62.03%
+Average Validation Loss of Epoch 9: 2.539746 | Acc: 10.31%
+####################Epoch 9 Model Saved#####################
+Increment early stopper to 6 because val loss (2.5397464426196352) is greater than threshold (2.3022005460700212)
+Epoch 10
+Average Training Loss of Epoch 10: 1.525759 | Acc: 65.41%
+Average Validation Loss of Epoch 10: 2.517847 | Acc: 7.73%
+####################Epoch 10 Model Saved####################
+Increment early stopper to 7 because val loss (2.5178468446342315) is greater than threshold (2.3022005460700212)
+Epoch 11
+Average Training Loss of Epoch 11: 1.474179 | Acc: 65.33%
+Average Validation Loss of Epoch 11: 2.474123 | Acc: 8.25%
+####################Epoch 11 Model Saved####################
+Increment early stopper to 8 because val loss (2.4741234390103086) is greater than threshold (2.3022005460700212)
+Epoch 12
+Average Training Loss of Epoch 12: 1.451783 | Acc: 66.77%
+Average Validation Loss of Epoch 12: 2.498175 | Acc: 6.70%
+####################Epoch 12 Model Saved####################
+Increment early stopper to 9 because val loss (2.498175470196471) is greater than threshold (2.3022005460700212)
+Epoch 13
+Average Training Loss of Epoch 13: 1.436003 | Acc: 68.22%
+Average Validation Loss of Epoch 13: 2.486509 | Acc: 7.22%
+####################Epoch 13 Model Saved####################
+Increment early stopper to 10 because val loss (2.486508695446715) is greater than threshold (2.3022005460700212)
+Model has overfit, early stopping...
+#####################Training Finished######################
