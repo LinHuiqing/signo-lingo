@@ -28,3 +28,24 @@
 | 1e-7         | `cnn_lstm_512_6_1_512_drop80_weightd7.log` |
 | 1e-8         | `cnn_lstm_512_6_1_512_drop80_weightd8.log` |
 | 0            | `cnn_lstm_512_6_1_512_drop80.log`          |
+
+## Experiment #4: Attention (CNN-LSTM)
+
+| Attention? | Log File Name                          |
+| ---------- | -------------------------------------- |
+| No         | `cnn_lstm_512_6_1_512_drop80.log`      |
+| Yes        | `cnn_lstm_512_6_1_512_drop80_attn.log` |
+
+## Experiment #5: Bidirectional 
+
+| Bidirectional? | Log File Name                                |
+| -------------- | -------------------------------------------- |
+| No             | `cnn_lstm_512_6_1_512_drop80_attn.log`       |
+| Yes            | `cnn_lstm_512_6_1_512_drop80_attn_bidir.log` |
+
+## Experiment #6: Attention (VGG11-LSTM)
+
+| Attention? | Log File Name                   |
+| ---------- | ------------------------------- |
+| No         | `vgg11_lstm_512_2_512.log`      |
+| Yes        | `vgg11_lstm_512_2_512_attn.log` |
