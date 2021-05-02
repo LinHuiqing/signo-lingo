@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+  <title>Sign language</title>
+  <h1>Signo Lingo</h1>
+  <h2>List of all user uploaded files</h2>
+  <body>
+    {% if files %}
+      <p>
+        <ul>
+        {% for file in files %}
+          <li>{{ file }}</li>
+        {% endfor %}
+        </ul>
+      </p>
+    {% endif %}
+  </body>
+</html>
