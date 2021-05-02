@@ -17,7 +17,8 @@ Signo Lingo is a video classification project that classifies sign languages int
 │   ├── dev_model/                         # stores model
 │   ├── test_model/                        # store notebook for testing
 │   ├── train_final/                       # final notebook
-│   └── Exploratory Data Analysis.ipynb    # notebook to run data analysis
+│   ├── Exploratory Data Analysis.ipynb    # notebook to run data analysis
+│   └── log_file_plots.ipynb               # code for plotting graphs based on log files
 ├── models/                                # saved models
 ├── web_gui/                               # code for web GUI
 ├── Big_Project_Instructions.pdf           # instructions for project
@@ -29,5 +30,7 @@ Signo Lingo is a video classification project that classifies sign languages int
 Sign language is a way of expressing oneself primarily through a series of hand gestures. However, it is dominantly used by the deaf and mute community and may prove to be a challenge for others who do not use the language to understand. Moreover, sign language is not universal -  each community develops its own sign language with unique intricacies. As such, this project aims to develop a sign language video classification model that will help others to interpret the semantic meanings behind the language.
 
 **Inputs**: Videos of gestures representing words in the Turkish Sign Language.
+
 **Outputs**: Classes that are mapped to a specific meaning, in English.
+
 **Deliverables**: Source Code (models, weights, logs, notebooks) and GUI
