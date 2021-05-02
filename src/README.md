@@ -25,14 +25,16 @@ This directory contains all code related to the model, including developing, tes
 
 ## 3. Final files and instructions on running them <a name="INSTRUCTIONS"></a>
 
+### Setting Up the Environment
+
 There are 2 ways of setting up:
 
 1. Using `conda`
 2. Using `pip`
 
-### Using `conda`
+#### Using `conda`
 
-1. Configure the conda enviornment
+1. Configure the conda environment
    ```bash
    conda env create -f environment.yml
    ```
@@ -48,7 +50,7 @@ There are 2 ways of setting up:
    ```bash
    pip install torchinfo
    ```
-5. Open jupyter noteboook
+5. Open jupyter notebook
    ```bash
    jupyter-notebook
    ```
@@ -62,7 +64,7 @@ There are 2 ways of setting up:
    conda env remove --name dl-big-proj
    ```
 
-### Using `pip`
+#### Using `pip`
 
 1. Create a virtual environment
    ```bash
@@ -76,7 +78,7 @@ There are 2 ways of setting up:
    ```bash
    pip install -r requirements.txt
    ```
-4. Open jupyter noteboook
+4. Open jupyter notebook
    ```bash
    jupyter-notebook
    ```
@@ -88,3 +90,11 @@ There are 2 ways of setting up:
    ```bash
    rm -r venv
    ```
+
+### Downloading the Dataset
+
+The dataset used is the AUTSL. The official dataset website is [here](http://chalearnlap.cvc.uab.es/dataset/40/description/).
+
+The dataset can downloaded [here](https://drive.google.com/file/d/1mcl-mm0rEZXuT5oDLofJmH6zOVqvQEWz/view?usp=sharing).
+
+After downloading the dataset, place the extracted contents of the file into the `./dataset` directory.
