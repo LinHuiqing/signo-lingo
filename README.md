@@ -1,1 +1,0 @@
-# signo-lingo
