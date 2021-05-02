@@ -56,7 +56,7 @@ There are 2 ways of setting up:
    ```bash
    conda deactivate
    ```
-7. To destroy envionment
+7. To destroy environment
    ```bash
    conda info --envs
    conda env remove --name dl-big-proj
@@ -84,7 +84,7 @@ There are 2 ways of setting up:
    ```bash
    deactivate
    ```
-6. To destroy envionment
+6. To destroy environment
    ```bash
    rm -r venv
    ```
