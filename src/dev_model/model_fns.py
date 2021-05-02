@@ -1,16 +1,16 @@
 import os
-import time
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from sklearn.metrics import accuracy_score, classification_report
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from sklearn.metrics import accuracy_score, classification_report
 
 
 class EarlyStopping:
+    """Keep track of loss values and determine whether to stop model."""
     def __init__(self, 
                  patience:int=10, 
                  delta:int=0, 
@@ -23,8 +23,12 @@ class EarlyStopping:
         self.overfit_count = 0
 
     def stop(self, loss):
+        """Update stored values based on new loss and return whether to stop model."""
         threshold = self.best_score + self.delta
+
+        # check if new loss is mode than threshold
         if loss > threshold:
+            # increase overfit count and print message
             self.overfit_count += 1
             print_msg = f"Increment early stopper to {self.overfit_count} because val loss ({loss}) is greater than threshold ({threshold})"
             if self.logger:
@@ -32,16 +36,20 @@ class EarlyStopping:
             else:
                 print(print_msg)
         else:
+            # reset overfit count
             self.overfit_count = 0
         
+        # update best_score if new loss is lower
         self.best_score = min(self.best_score, loss)
         
+        # check if overfit_count is more than patience set, return value accordingly
         if self.overfit_count >= self.patience:
             return True
         else:
             return False
 
 def _train_epoch(model, criterion, optimizer, dataloader, device):
+    """Train step within epoch."""
     model.train()
     losses = []
     all_label = []
@@ -67,8 +75,6 @@ def _train_epoch(model, criterion, optimizer, dataloader, device):
             prediction = torch.max(outputs, 1)[1]
             all_label.extend(labels)
             all_pred.extend(prediction)
-            # print(labels.cpu().data.squeeze().numpy())
-            # print(labels.cpu().data.numpy())
             score = accuracy_score(labels.cpu().data.numpy(), prediction.cpu().data.numpy())
             
             # backward & optimize
@@ -86,6 +92,7 @@ def _train_epoch(model, criterion, optimizer, dataloader, device):
     return train_loss, train_acc
 
 def _val_epoch(model, criterion, dataloader, device):
+    """Validation step within epoch."""
     model.eval()
     losses = []
     all_label = []
@@ -136,12 +143,16 @@ def train(model: nn.Module,
           optimizer_lr:int=0.001, 
           weight_decay:int=0, 
           use_scheduler:bool=False):
+    """Train function for model."""
     
+    # if save_dir is specified and does not exist, make save_dir directory
     if save_dir and not os.path.exists(save_dir):
         os.mkdir(save_dir)
     
+    # move model to device specified
     model.to(device)
 
+    # initialise loss function and optimizers
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=optimizer_lr, weight_decay=weight_decay)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=patience//3, verbose=True)
@@ -149,34 +160,38 @@ def train(model: nn.Module,
     start_epoch = 1
 
     if load_checkpoint and load_dir and load_epoch:
+        # load model from checkpoint
         checkpoint = torch.load(f"{load_dir}/{load_epoch}-checkpoint.pt")
         model.load_state_dict(checkpoint['model_state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
         start_epoch = checkpoint['epoch'] + 1
-
-    # Start training
+    
     logger.info("Training Started".center(60, '#'))
 
     early_stopper = EarlyStopping(patience=patience, logger=logger)
 
+    # start training
     for epoch in range(start_epoch, no_of_epochs+1):
         logger.info(f"Epoch {epoch}")
         
-        # Train the model
+        # train the model
         train_loss, train_acc = _train_epoch(model, criterion, optimizer, train_loader, device)
 
+        # write train loss and acc to logger
         writer.add_scalars('Loss', {'train': train_loss}, epoch)
         writer.add_scalars('Accuracy', {'train': train_acc}, epoch)
         logger.info("Average Training Loss of Epoch {}: {:.6f} | Acc: {:.2f}%".format(epoch, train_loss, train_acc*100))
 
-        # Validate the model
+        # validate the model
         val_loss, val_acc = _val_epoch(model, criterion, val_loader, device)
 
+        # write val loss and acc to logger
         writer.add_scalars('Loss', {'val': val_loss}, epoch)
         writer.add_scalars('Accuracy', {'val': val_acc}, epoch)
         logger.info("Average Validation Loss of Epoch {}: {:.6f} | Acc: {:.2f}%".format(epoch, val_loss, val_acc*100))
 
+        # save model or checkpoint
         if save_dir:
             if save_checkpoint:
                 torch.save({
@@ -192,13 +207,14 @@ def train(model: nn.Module,
             else:
                 torch.save(model.state_dict(), f"{save_dir}/{epoch}.pt")
 
-        # Save model
         logger.info(f"Epoch {epoch} Model Saved".center(60, '#'))
 
+        # update and check early stopper
         if early_stopper.stop(val_loss):
             logger.info("Model has overfit, early stopping...")
             break
         
+        # step scheduler
         if use_scheduler:
             scheduler.step(val_loss)
 

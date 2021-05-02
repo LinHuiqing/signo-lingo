@@ -2,12 +2,12 @@ from collections import OrderedDict
 
 import torch
 import torch.nn as nn
-from torch.autograd import Variable
-from torchvision.models import resnet18, resnet101, vgg11
 import torch.nn.functional as F
+from torchvision.models import resnet18, resnet101, vgg11
 
 
 class ConvBlock(nn.Module):
+    """Convolution block used in CNN."""
     def __init__(self, 
                  channel_in, 
                  channel_out, 
@@ -59,6 +59,7 @@ class ConvBlock(nn.Module):
         return out
 
 class CNN_Encoder(nn.Module):
+    """CNN Encoder for CNN part of model."""
     def __init__(self, 
                  channel_out, 
                  n_layers, 
@@ -111,7 +112,7 @@ class CNN_Encoder(nn.Module):
         return out
 
 class LSTM_Decoder(nn.Module):
-
+    """LSTM Decoder for RNN part of model."""
     def __init__(self, 
                  embed_dim, 
                  hidden_dim, 
@@ -140,8 +141,7 @@ class LSTM_Decoder(nn.Module):
             fc1_in = self.hidden_dim * 2
         else:
             fc1_in = self.hidden_dim
-        self.fc1 =  nn.Linear(fc1_in, channel_out) #fully connected 1
-        # self.fc2 = nn.Linear(128, channel_out) #fully connected last layer
+        self.fc1 =  nn.Linear(fc1_in, channel_out)
 
         if intermediate_act_fn == "relu":
             self.a_fn = nn.ReLU()
@@ -180,6 +180,88 @@ class LSTM_Decoder(nn.Module):
         
         return out, h
 
+class CNN_LSTM(nn.Module):
+    """CNN-LSTM model combining CNN and LSTM components."""
+    def __init__(self, 
+                 n_classes, 
+                 latent_size, 
+                 n_cnn_layers, 
+                 n_rnn_layers, 
+                 n_rnn_hidden_dim,
+                 channel_in=3, 
+                 cnn_act_fn="relu", 
+                 rnn_act_fn="relu", 
+                 dropout_rate=0.1,
+                 cnn_bn=False, 
+                 bidirectional=False, 
+                 attention=False,
+                 device="cuda"):
+        
+        super(CNN_LSTM, self).__init__()
+
+        self.attention = attention
+
+        self.encoder = CNN_Encoder(latent_size, 
+                                   n_cnn_layers, 
+                                   intermediate_act_fn=cnn_act_fn, 
+                                   use_batchnorm=cnn_bn, 
+                                   channel_in=channel_in)
+        self.decoder = LSTM_Decoder(latent_size, 
+                                    n_rnn_hidden_dim, 
+                                    n_classes, 
+                                    n_rnn_layers, 
+                                    intermediate_act_fn=rnn_act_fn, 
+                                    bidirectional=bidirectional, 
+                                    attention=attention,
+                                    device=device)
+
+        self.dropout = nn.Dropout(p=dropout_rate)
+
+    def forward(self, x):
+        batch_size, timesteps, C, H, W = x.size()
+
+        cnn_in = x.view(batch_size * timesteps, C, H, W)
+        latent_var = self.encoder(cnn_in)
+
+        rnn_in = latent_var.view(batch_size, timesteps, -1)
+        rnn_in = self.dropout(rnn_in)
+        out, _ = self.decoder(rnn_in)
+
+        return out
+
+class VGG_LSTM(nn.Module):
+    """VGG-LSTM model using VGG11 as CNN component."""
+    def __init__(self, 
+                 n_classes, 
+                 latent_size, 
+                 n_rnn_layers,
+                 n_rnn_hidden_dim,
+                 rnn_act_fn="relu",
+                 dropout_rate=0.1,
+                 bidirectional=False):
+        
+        super(VGG_LSTM, self).__init__()
+        
+        self.CNN = vgg11(pretrained=True, progress=False)
+        self.CNN.classifier[6] = nn.Linear(4096, latent_size)
+
+        self.decoder = LSTM_Decoder(latent_size, n_rnn_hidden_dim, n_classes, n_rnn_layers, intermediate_act_fn=rnn_act_fn, bidirectional=bidirectional)
+        self.dropout = nn.Dropout(p=dropout_rate)
+
+    def forward(self, x):
+        batch_size, timesteps, C, H, W = x.size()
+
+        cnn_in = x.view(batch_size * timesteps, C, H, W)
+        latent_var = self.CNN(cnn_in)
+
+        rnn_in = latent_var.view(batch_size, timesteps, -1)
+        rnn_in = self.dropout(rnn_in)
+        out = self.decoder(rnn_in)
+
+        return out
+
+# extra models for experimentation below
+
 class GRU_Decoder(nn.Module):
 
     def __init__(self, 
@@ -208,8 +290,7 @@ class GRU_Decoder(nn.Module):
             fc1_in = self.hidden_dim * 2
         else:
             fc1_in = self.hidden_dim
-        self.fc1 =  nn.Linear(fc1_in, channel_out) #fully connected 1
-        # self.fc2 = nn.Linear(128, channel_out) #fully connected last layer
+        self.fc1 =  nn.Linear(fc1_in, channel_out)
 
         if intermediate_act_fn == "relu":
             self.a_fn = nn.ReLU()
@@ -269,8 +350,7 @@ class RNN_Decoder(nn.Module):
             fc1_in = self.hidden_dim * 2
         else:
             fc1_in = self.hidden_dim
-        self.fc1 =  nn.Linear(fc1_in, channel_out) #fully connected 1
-        # self.fc2 = nn.Linear(128, channel_out) #fully connected last layer
+        self.fc1 =  nn.Linear(fc1_in, channel_out)
 
         if intermediate_act_fn == "relu":
             self.a_fn = nn.ReLU()
@@ -299,55 +379,6 @@ class RNN_Decoder(nn.Module):
             out = self.fc1(out)
         
         return out, h
-
-class CNN_LSTM(nn.Module):
-
-    def __init__(self, 
-                 n_classes, 
-                 latent_size, 
-                 n_cnn_layers, 
-                 n_rnn_layers, 
-                 n_rnn_hidden_dim,
-                 channel_in=3, 
-                 cnn_act_fn="relu", 
-                 rnn_act_fn="relu", 
-                 dropout_rate=0.1,
-                 cnn_bn=False, 
-                 bidirectional=False, 
-                 attention=False,
-                 device="cuda"):
-        
-        super(CNN_LSTM, self).__init__()
-
-        self.attention = attention
-
-        self.encoder = CNN_Encoder(latent_size, 
-                                   n_cnn_layers, 
-                                   intermediate_act_fn=cnn_act_fn, 
-                                   use_batchnorm=cnn_bn, 
-                                   channel_in=channel_in)
-        self.decoder = LSTM_Decoder(latent_size, 
-                                    n_rnn_hidden_dim, 
-                                    n_classes, 
-                                    n_rnn_layers, 
-                                    intermediate_act_fn=rnn_act_fn, 
-                                    bidirectional=bidirectional, 
-                                    attention=attention,
-                                    device=device)
-
-        self.dropout = nn.Dropout(p=dropout_rate)
-
-    def forward(self, x):
-        batch_size, timesteps, C, H, W = x.size()
-
-        cnn_in = x.view(batch_size * timesteps, C, H, W)
-        latent_var = self.encoder(cnn_in)
-
-        rnn_in = latent_var.view(batch_size, timesteps, -1)
-        rnn_in = self.dropout(rnn_in)
-        out, h = self.decoder(rnn_in)
-
-        return out
 
 class CNN_GRU(nn.Module):
 
@@ -453,37 +484,4 @@ class ResNet_LSTM(nn.Module):
         out = self.RNN(rnn_in)
 
         out = self.softmax(out)
-        return out
-
-class VGG_LSTM(nn.Module):
-
-    def __init__(self, 
-                 n_classes, 
-                 latent_size, 
-                 n_rnn_layers,
-                 n_rnn_hidden_dim,
-                 rnn_act_fn="relu",
-                 dropout_rate=0.1,
-                 bidirectional=False):
-        
-        super(VGG_LSTM, self).__init__()
-        
-        self.CNN = vgg11(pretrained=True, progress=False)
-        self.CNN.classifier[6] = nn.Linear(4096, latent_size)
-
-        self.decoder = LSTM_Decoder(latent_size, n_rnn_hidden_dim, n_classes, n_rnn_layers, intermediate_act_fn=rnn_act_fn, bidirectional=bidirectional)
-        self.dropout = nn.Dropout(p=dropout_rate)
-
-        self.softmax = nn.Softmax(dim=1)
-
-    def forward(self, x):
-        batch_size, timesteps, C, H, W = x.size()
-
-        cnn_in = x.view(batch_size * timesteps, C, H, W)
-        latent_var = self.CNN(cnn_in)
-
-        rnn_in = latent_var.view(batch_size, timesteps, -1)
-        rnn_in = self.dropout(rnn_in)
-        out = self.decoder(rnn_in)
-        # out = self.softmax(out)
         return out
