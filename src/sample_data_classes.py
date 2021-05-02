@@ -18,6 +18,8 @@ if __name__ == "__main__":
                         type=int, 
                         help='number to classes to filter to', 
                         required=True)
+    parser.add_argument('--dataset_dir', nargs='?', default='dataset', 
+                        help='dataset directory')
     parser.add_argument('--output_dir', nargs='?', default='data', 
                         help='output directory for filtered csvs')
     args = parser.parse_args()
@@ -26,10 +28,8 @@ if __name__ == "__main__":
     if not os.path.exists(args.output_dir):
         os.mkdir(args.output_dir)
 
-    dataset_dir = "dataset"
-
     # read csv with class ids
-    class_df = pd.read_csv(f'{dataset_dir}/SignList_ClassId_TR_EN.csv')
+    class_df = pd.read_csv(f'{args.dataset_dir}/SignList_ClassId_TR_EN.csv')
     u_len_label = len(class_df['ClassId'].unique())
     print("total unique label:", u_len_label)
 
@@ -46,9 +46,9 @@ if __name__ == "__main__":
 
     # read csv from dataset
     df_store = {}
-    df_store["train"] = pd.read_csv(f'{dataset_dir}/train_labels.csv', header=None)
-    df_store["val"] = pd.read_csv(f'{dataset_dir}/val_ground_truth.csv', header=None)
-    df_store["test"] = pd.read_csv(f'{dataset_dir}/test_ground_truth.csv', header=None)
+    df_store["train"] = pd.read_csv(f'{args.dataset_dir}/train_labels.csv', header=None)
+    df_store["val"] = pd.read_csv(f'{args.dataset_dir}/val_ground_truth.csv', header=None)
+    df_store["test"] = pd.read_csv(f'{args.dataset_dir}/test_ground_truth.csv', header=None)
 
     # get filtered sets and save them
     for dataset_type, df in df_store.items():
@@ -56,3 +56,4 @@ if __name__ == "__main__":
         df[1] = df[1].map(dict(zip(class_df["oldClassId"], class_df["ClassId"])))
         print(f"filtered {dataset_type} set has {len(df)} rows")
         df.to_csv(f"{args.output_dir}/{dataset_type}.csv", header=False, index=False)
+

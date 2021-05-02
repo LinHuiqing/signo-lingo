@@ -139,5 +139,10 @@ cython_debug/
 # vscode configs
 .vscode/
 
-# dataset dir
+# dataset
 dataset/*/
+*.zip
+
+# saved models
+*.pt
+*.pth
