@@ -39,12 +39,15 @@ def upload_file():
     model_path = "./models/8-checkpoint.pt"
     test_label_path = "./data/test.csv"
     label_meta_path = "./data/filtered_ClassId.csv"
-    ground_truth, output_label = get_prediction(video_name, video_path, model_path, test_label_path, label_meta_path)
-    if ground_truth:
-      flash("Ground truth: {}".format(ground_truth))
-    else:
-      flash("This uploaded video was not from the dataset")
-    flash("Predicted label: {}".format(output_label))
+    try:
+      ground_truth, output_label = get_prediction(video_name, video_path, model_path, test_label_path, label_meta_path)
+      if ground_truth:
+        flash("Ground truth: {}".format(ground_truth))
+      else:
+        flash("This uploaded video was not from the dataset")
+      flash("Predicted label: {}".format(output_label))
+    except:
+      flash("This uploaded video is less than 30 frames, please upload another video")
     return render_template("index.html", filename="uploads/" + filename)
   else:
     flash("Allowed image types are -> mp4")
